@@ -16,7 +16,7 @@
 #    --verbose
 
 #python test_inference_testset_v3.py output_test_4ch/ZHUUDNPZT/model_00000
-python test_inference_testset_v3.py output_test_4ch_gpu/output_test_4ch/GVAVUGQNU/model_00000 \
+python test_inference_testset_v3.py output_test_4ch_gpu/UR4P9V3VP/model_00009 \
     --config config/bathrooms_test_config_4ch.yaml \
     --json-dir data/bathroom_2.2k_filter \
     --num-scenes 10 \
