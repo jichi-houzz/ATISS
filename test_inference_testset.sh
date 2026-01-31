@@ -8,7 +8,7 @@
 #    --num-scenes 10 \
 #    --verbose
 
-python test_inference_testset_v3.py output_test_4ch/epoch50_jvvdluvdm/model_00049 \
+python test_inference_testset_v3.py output_test_4ch/1IKKVL01K/model_00001 \
     --config config/bathrooms_test_config_4ch.yaml \
     --json-dir data/bathroom_2.2k_filter \
     --num-scenes 10 \
