@@ -383,7 +383,7 @@ def main():
     parser = argparse.ArgumentParser(description='Preprocess bathroom JSON data for ATISS training')
     parser.add_argument('input_dir', type=str, help='Directory containing JSON files')
     parser.add_argument('output_dir', type=str, help='Output directory for preprocessed data')
-    parser.add_argument('--resolution', type=int, default=128, help='Resolution for room masks (default: 128)')
+    parser.add_argument('--resolution', type=int, default=64, help='Resolution for room masks (default: 64)')
 
     args = parser.parse_args()
 

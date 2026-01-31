@@ -31,12 +31,12 @@ class BathroomDataPreprocessor:
         'tub': 3
     }
 
-    def __init__(self, resolution: int = 128):
+    def __init__(self, resolution: int = 64):
         """
         Initialize preprocessor.
 
         Args:
-            resolution: Target resolution for room masks (default: 128)
+            resolution: Target resolution for room masks (default: 64)
         """
         self.resolution = resolution
 
@@ -90,10 +90,10 @@ class BathroomDataPreprocessor:
         return room_dims
 
     def create_floor_plan_mask(self, items: List[Dict], room_dims: Dict,
-                                resolution: int = 128) -> np.ndarray:
+                                resolution: int = 64) -> np.ndarray:
         """
         Create 4-channel floor plan mask.
-        
+
         Channel 0: Floors (walkable area)
         Channel 1: Walls
         Channel 2: Doors
@@ -105,7 +105,7 @@ class BathroomDataPreprocessor:
             resolution: Target resolution
 
         Returns:
-            4-channel mask (128, 128, 4) where each channel is binary
+            4-channel mask (64, 64, 4) where each channel is binary
         """
         from PIL import Image, ImageDraw
 
@@ -121,7 +121,7 @@ class BathroomDataPreprocessor:
         canvas_wall = Image.new('L', (canvas_width, canvas_height), color=0)
         canvas_door = Image.new('L', (canvas_width, canvas_height), color=0)
         canvas_window = Image.new('L', (canvas_width, canvas_height), color=0)
-        
+
         draw_floor = ImageDraw.Draw(canvas_floor)
         draw_wall = ImageDraw.Draw(canvas_wall)
         draw_door = ImageDraw.Draw(canvas_door)
@@ -130,7 +130,7 @@ class BathroomDataPreprocessor:
         # Process each item
         for item in items:
             diffusion_type = item.get('diffusion_type')
-            
+
             # Get geometry
             cx = item['center_x']
             cz = item['center_z']
@@ -190,15 +190,15 @@ class BathroomDataPreprocessor:
             if diffusion_type == self.FLOOR_TYPE:
                 # Floor: filled polygon
                 draw_floor.polygon(corners_pixels, fill=255)
-                
+
             elif diffusion_type == 'wall':
                 # Wall: outline only (thickness=3)
                 draw_wall.polygon(corners_pixels, outline=255, width=3)
-                
+
             elif diffusion_type == 'door':
                 # Door: filled polygon
                 draw_door.polygon(corners_pixels, fill=255)
-                
+
             elif diffusion_type == 'window':
                 # Window: filled polygon
                 draw_window.polygon(corners_pixels, fill=255)
@@ -209,25 +209,25 @@ class BathroomDataPreprocessor:
 
         new_width = int(canvas_width * scale_factor)
         new_height = int(canvas_height * scale_factor)
-        
+
         # Resize each channel
         channels_resized = []
         for canvas in [canvas_floor, canvas_wall, canvas_door, canvas_window]:
             canvas_resized = canvas.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
+
             # Create final image with padding to center
             final_channel = Image.new('L', (resolution, resolution), color=0)
             offset_x = (resolution - new_width) // 2
             offset_y = (resolution - new_height) // 2
             final_channel.paste(canvas_resized, (offset_x, offset_y))
-            
+
             # Convert to numpy and binarize
             mask_channel = np.array(final_channel)
             mask_channel = (mask_channel > 127).astype(np.uint8)
             channels_resized.append(mask_channel)
 
         # Stack into 4-channel array
-        mask_4channel = np.stack(channels_resized, axis=-1)  # (128, 128, 4)
+        mask_4channel = np.stack(channels_resized, axis=-1)  # (64, 64, 4)
 
         return mask_4channel
         """
@@ -239,7 +239,7 @@ class BathroomDataPreprocessor:
             resolution: Target resolution
 
         Returns:
-            Binary mask (128, 128) where 1=floor, 0=everything else
+            Binary mask (64, 64) where 1=floor, 0=everything else
         """
         from PIL import Image, ImageDraw
 
@@ -522,7 +522,7 @@ def main():
     parser = argparse.ArgumentParser(description='Preprocess bathroom JSON data for ATISS training')
     parser.add_argument('input_dir', type=str, help='Directory containing JSON files')
     parser.add_argument('output_dir', type=str, help='Output directory for preprocessed data')
-    parser.add_argument('--resolution', type=int, default=128, help='Resolution for room masks (default: 128)')
+    parser.add_argument('--resolution', type=int, default=64, help='Resolution for room masks (default: 64)')
 
     args = parser.parse_args()
 

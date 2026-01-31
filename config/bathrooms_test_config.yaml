@@ -8,7 +8,7 @@ data:
     augmentations: ["rotations"]
     filter_fn: "bathroom"
     train_stats: "dataset_stats.txt"
-    room_layout_size: "128,128"
+    room_layout_size: "64,64"
 network:
     type: "autoregressive_transformer"
     n_layers: 4

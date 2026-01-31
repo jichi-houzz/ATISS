@@ -9,7 +9,7 @@ data:
     augmentations: []
     filter_fn: "bathroom"
     train_stats: "dataset_stats.txt"
-    room_layout_size: "128,128"
+    room_layout_size: "64,64"
 network:
     type: "autoregressive_transformer"
     n_layers: 4
@@ -35,6 +35,7 @@ training:
     save_frequency: 10
     optimizer: Adam
     lr: 0.0001
+
     weight_decay: 0.0
 
     # Instant
