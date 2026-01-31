@@ -138,14 +138,25 @@ def save_scene_visualization(boxes, room_mask, output_path):
         x = int((translations[i, 0] + 1) * W / 2)
         z = int((translations[i, 2] + 1) * H / 2)
         
-        # Convert normalized size to pixels
-        w = int(sizes[i, 0] * W / 2)
-        d = int(sizes[i, 2] * H / 2)
+        # Convert normalized size to pixels (take absolute value)
+        w = int(abs(sizes[i, 0]) * W / 2)
+        d = int(abs(sizes[i, 2]) * H / 2)
         
-        # Draw bounding box
+        # Draw bounding box (ensure x1 < x2 and z1 < z2)
         color = colors.get(class_idx, (128, 128, 128))
         x1, z1 = max(0, x - w//2), max(0, z - d//2)
         x2, z2 = min(W, x + w//2), min(H, z + d//2)
+        
+        # Swap if needed
+        if x1 > x2:
+            x1, x2 = x2, x1
+        if z1 > z2:
+            z1, z2 = z2, z1
+        
+        # Skip if box is still invalid
+        if x1 >= x2 or z1 >= z2:
+            print(f"  Warning: Skipping invalid box at index {i}")
+            continue
         
         draw.rectangle([x1, z1, x2, z2], outline=color, width=2)
         draw.text((x, z), str(class_idx), fill=color)
