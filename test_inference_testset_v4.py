@@ -17,12 +17,12 @@ from scene_synthesis.networks import build_network
 def load_architecture_from_json(json_path, room_dims, bounds):
     """
     Load architecture items (walls, doors, windows) from original JSON.
-    
+
     Args:
         json_path: Path to original JSON
         room_dims: Room dimensions dict
         bounds: Normalization bounds dict
-    
+
     Returns:
         List of architecture dicts with normalized coordinates
     """
@@ -34,7 +34,7 @@ def load_architecture_from_json(json_path, room_dims, bounds):
 
     items = data.get('items', [])
     architecture = []
-    
+
     bounds_min = bounds['bounds_min']
     bounds_max = bounds['bounds_max']
     size_min = bounds['size_min']
@@ -163,7 +163,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             class_idx = test_dataset.CATEGORIES.index(bbox.label)
             one_hot[class_idx] = 1.0
             gt_class_labels.append(one_hot)
-            
+
             # Extract 2D coordinates (x, z) from 3D centroid
             centroid = bbox.centroid()
             if len(centroid) == 3:
@@ -172,7 +172,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             else:
                 # Already 2D
                 gt_translations.append(centroid)
-            
+
             # Extract 2D size (width, depth)
             bbox_size = bbox.size
             if len(bbox_size) == 3:
@@ -181,7 +181,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             else:
                 # Already 2D
                 gt_sizes.append(bbox_size)
-            
+
             gt_angles.append([bbox.z_angle])
 
         ground_truth = {
@@ -303,7 +303,7 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
             bounds_max = bounds['bounds_max']
             size_min = bounds['size_min']
             size_max = bounds['size_max']
-            
+
             # Denormalize from [0, 1] to world coords
             real_x = norm_x * (bounds_max - bounds_min) + bounds_min
             real_z = norm_z * (bounds_max - bounds_min) + bounds_min
@@ -491,9 +491,9 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
     print(f"\n{'='*60}")
     print(f"Scene: {scene_id}")
     print(f"{'='*60}")
-    
+
     categories = ['toilet', 'vanity', 'shower', 'tub']
-    
+
     # Ground truth count
     gt_count = len(ground_truth['class_labels'])
     print(f"\n📍 Ground Truth: {gt_count} objects")
@@ -503,7 +503,7 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
         pos = ground_truth['translations'][i]
         size = ground_truth['sizes'][i]
         angle = ground_truth['angles'][i, 0] if len(ground_truth['angles'][i].shape) > 0 else ground_truth['angles'][i]
-        
+
         # Handle both 2D (x, z) and 3D (x, y, z) formats
         if len(pos) == 3:
             # 3D format: use x and z, skip y
@@ -511,7 +511,7 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
         else:
             # 2D format: use as-is
             print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
-    
+
     # Generated objects
     gen_count = 0
     print(f"\n🎲 Generated Objects:")
@@ -522,32 +522,32 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
         if generated['class_labels'][i, -1] == 1:  # end token
             print(f"  [{i}] END_TOKEN")
             break
-        
+
         class_idx = np.argmax(generated['class_labels'][i, :4])
         category = categories[class_idx] if class_idx < 4 else "unknown"
         pos = generated['translations'][i]
         size = generated['sizes'][i]
         angle = generated['angles'][i, 0] if len(generated['angles'][i].shape) > 0 else generated['angles'][i]
-        
+
         # Denormalize if bounds available
         if bounds:
             bounds_min = bounds['bounds_min']
             bounds_max = bounds['bounds_max']
             size_min = bounds['size_min']
             size_max = bounds['size_max']
-            
+
             real_x = pos[0] * (bounds_max - bounds_min) + bounds_min
             real_z = pos[1] * (bounds_max - bounds_min) + bounds_min
             real_size_x = size[0] * (size_max - size_min) + size_min
             real_size_z = size[1] * (size_max - size_min) + size_min
-            
+
             print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
                   f"size=({size[0]:.3f}, {size[1]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle):6.1f}°")
         else:
             print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
-        
+
         gen_count += 1
-    
+
     print(f"\n📊 Summary: GT={gt_count} objects, Generated={gen_count} objects")
 
 
