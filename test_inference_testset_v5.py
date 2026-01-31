@@ -545,8 +545,8 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
 
         class_idx = np.argmax(generated['class_labels'][i, :4])
         category = categories[class_idx] if class_idx < 4 else "unknown"
-        pos = generated['translations'][i]
-        size = generated['sizes'][i]
+        pos = generated['translations'][i]  # 3D: (x, y, z)
+        size = generated['sizes'][i]        # 3D: (width, height, depth)
         angle = generated['angles'][i, 0] if len(generated['angles'][i].shape) > 0 else generated['angles'][i]
 
         # Denormalize if bounds available
@@ -557,15 +557,16 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
             size_max = bounds['size_max']
             
             # ATISS uses [-1, 1] range, need to convert back
+            # Use pos[0] (x) and pos[2] (z), skip pos[1] (y)
             real_x = (pos[0] + 1) / 2 * (position_max - position_min) + position_min
-            real_z = (pos[1] + 1) / 2 * (position_max - position_min) + position_min
+            real_z = (pos[2] + 1) / 2 * (position_max - position_min) + position_min
             real_size_x = (size[0] + 1) / 2 * (size_max - size_min) + size_min
-            real_size_z = (size[1] + 1) / 2 * (size_max - size_min) + size_min
+            real_size_z = (size[2] + 1) / 2 * (size_max - size_min) + size_min
             
-            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
-                  f"size=({size[0]:.3f}, {size[1]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle):6.1f}°")
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
+                  f"size=({size[0]:.3f}, {size[2]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle):6.1f}°")
         else:
-            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) | size=({size[0]:.3f}, {size[2]:.3f}) | angle={np.degrees(angle):6.1f}°")
 
         gen_count += 1
 
