@@ -36,37 +36,36 @@ class BathroomDataPreprocessor:
             return json.load(f)
     
     def extract_floor_plan_info(self, items: List[Dict]) -> Tuple[List[Dict], Dict]:
-        """Extract floor plan boundaries and architecture info."""
+        """
+        Extract floor plan boundaries and architecture info.
+        
+        Room dimensions are calculated from ALL items in the scene (furniture + architecture)
+        to ensure the bounding box covers everything.
+        """
         architecture_items = [item for item in items if item['object_type'] in self.ARCHITECTURE_TYPES]
         
-        # Get room boundaries from floor items
-        floor_items = [item for item in items if item['object_type'] == 'floor']
+        # Get room boundaries from ALL items (not just floors)
+        # This ensures furniture outside the floor polygons is still included
+        if not items:
+            return None, None
         
-        if not floor_items:
-            # Fallback: use walls to determine boundaries
-            wall_items = [item for item in items if item['object_type'] == 'wall']
-            if wall_items:
-                x_coords = []
-                z_coords = []
-                for wall in wall_items:
-                    x_coords.extend([
-                        wall['center_x'] - wall['size_x']/2,
-                        wall['center_x'] + wall['size_x']/2
-                    ])
-                    z_coords.extend([
-                        wall['center_z'] - wall['size_z']/2,
-                        wall['center_z'] + wall['size_z']/2
-                    ])
-                min_x, max_x = min(x_coords), max(x_coords)
-                min_z, max_z = min(z_coords), max(z_coords)
-            else:
-                return None, None
-        else:
-            # Use ALL floor polygons to determine room size (handles L-shaped rooms)
-            min_x = min(f['center_x'] - f['size_x']/2 for f in floor_items)
-            max_x = max(f['center_x'] + f['size_x']/2 for f in floor_items)
-            min_z = min(f['center_z'] - f['size_z']/2 for f in floor_items)
-            max_z = max(f['center_z'] + f['size_z']/2 for f in floor_items)
+        x_coords = []
+        z_coords = []
+        
+        for item in items:
+            # Get bounding box of each item
+            x1 = item['center_x'] - item['size_x'] / 2
+            x2 = item['center_x'] + item['size_x'] / 2
+            z1 = item['center_z'] - item['size_z'] / 2
+            z2 = item['center_z'] + item['size_z'] / 2
+            
+            x_coords.extend([x1, x2])
+            z_coords.extend([z1, z2])
+        
+        min_x = min(x_coords)
+        max_x = max(x_coords)
+        min_z = min(z_coords)
+        max_z = max(z_coords)
         
         room_dims = {
             'min_x': min_x,
@@ -75,7 +74,7 @@ class BathroomDataPreprocessor:
             'max_z': max_z,
             'width': max_x - min_x,
             'depth': max_z - min_z,
-            'center_x': (min_x + max_x) / 2,
+            'center_x': (min_x + max_x) / 2,  # Center of ALL items combined
             'center_z': (min_z + max_z) / 2
         }
         
@@ -86,10 +85,12 @@ class BathroomDataPreprocessor:
         """
         Create floor plan mask with FIXED SCALE and centered positioning.
         
+        Handles rotated floor polygons using yaw angle.
+        
         Strategy:
         1. Use fixed scale (40 pixels/meter)
         2. Create canvas large enough for room at this scale
-        3. Draw all floor polygons
+        3. Draw all floor polygons (supporting rotation)
         4. Pad/crop to center in resolution x resolution image
         """
         from PIL import Image, ImageDraw
@@ -108,21 +109,67 @@ class BathroomDataPreprocessor:
         # Draw each floor polygon
         for item in architecture_items:
             if item['object_type'] in ['floor', 'door']:
-                # Get corners in world coordinates
-                x1 = item['center_x'] - item['size_x'] / 2
-                x2 = item['center_x'] + item['size_x'] / 2
-                z1 = item['center_z'] - item['size_z'] / 2
-                z2 = item['center_z'] + item['size_z'] / 2
+                # Get center and size
+                cx = item['center_x']
+                cz = item['center_z']
+                w = item['size_x']
+                d = item['size_z']
+                yaw = item.get('yaw', 0.0)
                 
-                # Convert to canvas pixels
-                # Translate to origin, then scale
-                px1 = int((x1 - room_dims['min_x']) * PIXELS_PER_METER)
-                px2 = int((x2 - room_dims['min_x']) * PIXELS_PER_METER)
-                py1 = int((z1 - room_dims['min_z']) * PIXELS_PER_METER)
-                py2 = int((z2 - room_dims['min_z']) * PIXELS_PER_METER)
-                
-                # Draw white rectangle
-                draw.rectangle([px1, py1, px2, py2], fill=255)
+                # Check if rotated
+                if abs(yaw) < 0.001:
+                    # Axis-aligned rectangle - simple case
+                    x1 = cx - w / 2
+                    x2 = cx + w / 2
+                    z1 = cz - d / 2
+                    z2 = cz + d / 2
+                    
+                    # Convert to canvas pixels
+                    px1 = int((x1 - room_dims['min_x']) * PIXELS_PER_METER)
+                    px2 = int((x2 - room_dims['min_x']) * PIXELS_PER_METER)
+                    py1 = int((z1 - room_dims['min_z']) * PIXELS_PER_METER)
+                    py2 = int((z2 - room_dims['min_z']) * PIXELS_PER_METER)
+                    
+                    # Draw rectangle
+                    draw.rectangle([px1, py1, px2, py2], fill=255)
+                else:
+                    # Rotated rectangle - calculate 4 corners
+                    yaw_rad = np.radians(yaw)
+                    cos_yaw = np.cos(yaw_rad)
+                    sin_yaw = np.sin(yaw_rad)
+                    
+                    # Half dimensions
+                    hw = w / 2
+                    hd = d / 2
+                    
+                    # 4 corners relative to center (before rotation)
+                    corners_local = [
+                        (-hw, -hd),
+                        ( hw, -hd),
+                        ( hw,  hd),
+                        (-hw,  hd)
+                    ]
+                    
+                    # Rotate and translate to world coordinates
+                    corners_world = []
+                    for lx, lz in corners_local:
+                        # Rotate
+                        rx = lx * cos_yaw - lz * sin_yaw
+                        rz = lx * sin_yaw + lz * cos_yaw
+                        # Translate
+                        wx = cx + rx
+                        wz = cz + rz
+                        corners_world.append((wx, wz))
+                    
+                    # Convert to canvas pixels
+                    corners_pixels = []
+                    for wx, wz in corners_world:
+                        px = int((wx - room_dims['min_x']) * PIXELS_PER_METER)
+                        py = int((wz - room_dims['min_z']) * PIXELS_PER_METER)
+                        corners_pixels.append((px, py))
+                    
+                    # Draw rotated polygon
+                    draw.polygon(corners_pixels, fill=255)
         
         # Now we need to fit this canvas into resolution x resolution
         # with the room centered
