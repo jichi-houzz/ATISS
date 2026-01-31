@@ -1,36 +1,89 @@
-# 
+#
 # Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
 # Licensed under the NVIDIA Source Code License.
 # See LICENSE at https://github.com/nv-tlabs/ATISS.
 # Authors: Despoina Paschalidou, Amlan Kar, Maria Shugrina, Karsten Kreis,
 #          Andreas Geiger, Sanja Fidler
-# 
+#
 
 import torch
 import torch.nn as nn
 
-from fast_transformers.builders import TransformerEncoderBuilder
-from fast_transformers.masking import LengthMask
+#from fast_transformers.builders import TransformerEncoderBuilder
+#from fast_transformers.masking import LengthMask
 
 from .base import FixedPositionalEncoding
 from ..stats_logger import StatsLogger
 
+class TransformerEncoderWrapper(nn.Module):
+    """Wrapper around PyTorch's TransformerEncoder to match fast_transformers API."""
+    def __init__(self, d_model, nhead, num_layers, dim_feedforward, activation='gelu'):
+        super().__init__()
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            activation=activation,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=num_layers
+        )
+
+    def forward(self, x, length_mask=None):
+        # 如果有 length_mask，转换成 PyTorch 的 src_key_padding_mask
+        src_key_padding_mask = None
+        if length_mask is not None:
+            B = x.shape[0]
+            L = x.shape[1]
+            src_key_padding_mask = torch.zeros(B, L, dtype=torch.bool, device=x.device)
+            for i, length in enumerate(length_mask.lengths):
+                length = int(length.item()) if torch.is_tensor(length) else int(length)
+                if length < L:
+                    src_key_padding_mask[i, length:] = True
+
+        # 创建 causal mask
+        L = x.shape[1]
+        causal_mask = nn.Transformer.generate_square_subsequent_mask(L).to(x.device)
+
+        return self.transformer_encoder(
+            x,
+            mask=causal_mask,
+            src_key_padding_mask=src_key_padding_mask
+        )
+
+
+class LengthMask:
+    """Simple replacement for fast_transformers.masking.LengthMask"""
+    def __init__(self, lengths, max_len=None):
+        self.lengths = lengths
+        self.max_len = max_len
 
 class BaseAutoregressiveTransformer(nn.Module):
     def __init__(self, input_dims, hidden2output, feature_extractor, config):
         super().__init__()
         # Build a transformer encoder
-        self.transformer_encoder = TransformerEncoderBuilder.from_kwargs(
-            n_layers=config.get("n_layers", 6),
-            n_heads=config.get("n_heads", 12),
-            query_dimensions=config.get("query_dimensions", 64),
-            value_dimensions=config.get("value_dimensions", 64),
-            feed_forward_dimensions=config.get(
-                "feed_forward_dimensions", 3072
-            ),
-            attention_type="full",
+        #self.transformer_encoder = TransformerEncoderBuilder.from_kwargs(
+        #    n_layers=config.get("n_layers", 6),
+        #    n_heads=config.get("n_heads", 12),
+        #    query_dimensions=config.get("query_dimensions", 64),
+        #    value_dimensions=config.get("value_dimensions", 64),
+        #    feed_forward_dimensions=config.get(
+        #        "feed_forward_dimensions", 3072
+        #    ),
+        #    attention_type="full",
+        #    activation="gelu"
+        #).get()
+
+        d_model = 512
+        self.transformer_encoder = TransformerEncoderWrapper(
+            d_model=d_model,
+            nhead=config.get("n_heads", 12),
+            num_layers=config.get("n_layers", 6),
+            dim_feedforward=config.get("feed_forward_dimensions", 3072),
             activation="gelu"
-        ).get()
+        )
 
         self.register_parameter(
             "start_token_embedding",
@@ -448,7 +501,7 @@ class AutoregressiveTransformer(BaseAutoregressiveTransformer):
     def distribution_translations(
         self,
         boxes,
-        room_mask, 
+        room_mask,
         class_label,
         device="cpu"
     ):
