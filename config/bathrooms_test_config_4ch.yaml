@@ -41,14 +41,19 @@ training:
     #batch_size: 4
 
     # 10min CPU, Test
+    #epochs: 50
+    #steps_per_epoch: 100
+    #batch_size: 4
+
+    # 50 min CPU, 30%
     epochs: 50
-    steps_per_epoch: 100
+    steps_per_epoch: 440
     batch_size: 4
 
     # 2.5 hour CPU, 50%
-    #epochs: 150
-    #steps_per_epoch: 440
-    #batch_size: 4
+    epochs: 150
+    steps_per_epoch: 440
+    batch_size: 4
 
     # 30min GPU, 80%, paper batch used 128
     #epochs: 150
