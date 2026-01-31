@@ -31,7 +31,7 @@ def load_model(config_path, checkpoint_path, device='cpu'):
     network, _, _ = build_network(
         input_dims=input_dims,
         n_classes=len(dataset.class_labels),
-        config=config.get("network", {}),
+        config=config,  # Pass full config, not just config["network"]
         weight_file=None,
         device=device
     )
