@@ -304,6 +304,7 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, archit
 
     # Draw architecture on GT image
     draw_architecture(draw_gt, architecture, room_dims, W, H, denormalize_and_to_pixel)
+    draw_architecture(draw_gen, architecture, room_dims, W, H, denormalize_and_to_pixel)
 
     # Furniture colors
     colors = {
