@@ -173,12 +173,20 @@ class BathroomDataset(BaseDataset):
 
     @property
     def bounds(self):
-        """Return bounds for normalization/denormalization."""
-        # These bounds are used for scaling by ATISS
-        # Since our data is already normalized to [-1, 1], we use these bounds
+        """Return hard-coded bounds for normalization/denormalization."""
+        # Hard-coded bounds based on dataset statistics:
+        # - Position: [-25, 25] meters (x and z)
+        # - Size: [0, 7] meters (width and depth)
+        # - Angle: [0, 2π] radians
         return {
-            "translations": np.array([[-1, -1, -1], [1, 1, 1]], dtype=np.float32),
-            "sizes": np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float32),
+            "translations": np.array([
+                [-25.0, 0.0, -25.0],  # min (x, y, z)
+                [25.0, 0.0, 25.0]      # max (x, y, z)
+            ], dtype=np.float32),
+            "sizes": np.array([
+                [0.0, 0.0, 0.0],       # min
+                [7.0, 7.0, 7.0]        # max (use same bound for all dimensions)
+            ], dtype=np.float32),
             "angles": np.array([0, 2*np.pi], dtype=np.float32)
         }
 
