@@ -38,7 +38,8 @@ def load_model(config_path, checkpoint_path, device='cpu'):
     
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    network.load_state_dict(checkpoint['model_state_dict'])
+    # Checkpoint is directly the state_dict, not a dictionary with 'model_state_dict' key
+    network.load_state_dict(checkpoint)
     network.eval()
     
     return network, dataset, config
