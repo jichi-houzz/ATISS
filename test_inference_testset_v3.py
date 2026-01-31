@@ -8,6 +8,7 @@ from pathlib import Path
 import argparse
 from tqdm import tqdm
 import json
+import time
 
 from scene_synthesis.datasets.bathroom import BathroomDataset
 from scene_synthesis.networks import build_network
@@ -130,12 +131,16 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
 
         room_mask = torch.from_numpy(room_mask_np).permute(2, 0, 1)[None].float().to(device)
 
+        start_time = time.time()
         with torch.no_grad():
             generated_boxes = network.generate_boxes(
                 room_mask=room_mask,
                 max_boxes=5,
                 device=device
             )
+        stop_time = time.time()
+        latency = stop_time - start_time
+        print(f"Latency: {latency}s")
 
         generated = {
             'class_labels': generated_boxes['class_labels'][0].cpu().numpy(),
