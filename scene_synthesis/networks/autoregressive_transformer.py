@@ -293,6 +293,73 @@ class AutoregressiveTransformer(BaseAutoregressiveTransformer):
             "angles": boxes["angles"].to("cpu")
         }
 
+    @torch.no_grad()
+    def generate_boxes_with_callback(self, room_mask, max_boxes=32, device="cpu", callback=None):
+        """
+        逐个生成家具，callback 可以修改每个生成的家具
+
+        Args:
+            callback: 函数签名 callback(i, all_boxes, new_box) -> (continue, modified_box)
+                      - continue: bool, True=继续生成, False=停止
+                      - modified_box: dict or None
+                        - None: 使用原始的 new_box
+                        - dict: 使用修改后的 box
+
+        Returns:
+            生成的所有家具
+        """
+        boxes = self.start_symbol(device)
+
+        for i in range(max_boxes):
+            # 生成下一个家具
+            box = self.autoregressive_decode(boxes, room_mask=room_mask)
+
+            # 调用回调（如果提供）
+            if callback is not None:
+                # 转换为 CPU 供回调使用
+                current_boxes = {
+                    "class_labels": boxes["class_labels"].to("cpu"),
+                    "translations": boxes["translations"].to("cpu"),
+                    "sizes": boxes["sizes"].to("cpu"),
+                    "angles": boxes["angles"].to("cpu")
+                }
+
+                new_box_cpu = {
+                    "class_labels": box["class_labels"].to("cpu"),
+                    "translations": box["translations"].to("cpu"),
+                    "sizes": box["sizes"].to("cpu"),
+                    "angles": box["angles"].to("cpu")
+                }
+
+                # 调用回调，获取两个返回值
+                should_continue, modified_box = callback(i, current_boxes, new_box_cpu)
+
+                # 处理返回值
+                if not should_continue:
+                    # 停止生成
+                    print(f"Callback requested stop at iteration {i}")
+                    break
+
+                if modified_box is not None:
+                    # 使用修改后的 box，转回 device
+                    box = {k: v.to(device) for k, v in modified_box.items()}
+
+            # 拼接到已有的
+            for k in box.keys():
+                boxes[k] = torch.cat([boxes[k], box[k]], dim=1)
+
+            # 检查 END token
+            if box["class_labels"][0, 0, -1] == 1:
+                print(f"END token generated at iteration {i}")
+                break
+
+        return {
+            "class_labels": boxes["class_labels"].to("cpu"),
+            "translations": boxes["translations"].to("cpu"),
+            "sizes": boxes["sizes"].to("cpu"),
+            "angles": boxes["angles"].to("cpu")
+        }
+
     def autoregressive_decode_with_class_label(
         self, boxes, room_mask, class_label
     ):

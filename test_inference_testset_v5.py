@@ -13,6 +13,7 @@ import time
 from scene_synthesis.datasets.bathroom import BathroomDataset
 from scene_synthesis.networks import build_network
 
+USE_BATCH_GEN = False
 
 def load_architecture_from_json(json_path, room_dims, bounds):
     """
@@ -143,11 +144,12 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
 
         start_time = time.time()
         with torch.no_grad():
-            generated_boxes = network.generate_boxes(
+            generated_boxes = network.generate_boxes_with_callback(
                 room_mask=room_mask,
                 max_boxes=4, # 4 furniture
                 device=device
             )
+
         stop_time = time.time()
         latency = stop_time - start_time
         print(f"Latency: {latency}s")
