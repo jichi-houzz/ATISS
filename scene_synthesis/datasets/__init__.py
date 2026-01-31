@@ -1,17 +1,17 @@
-# 
+#
 # Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
 # Licensed under the NVIDIA Source Code License.
 # See LICENSE at https://github.com/nv-tlabs/ATISS.
 # Authors: Despoina Paschalidou, Amlan Kar, Maria Shugrina, Karsten Kreis,
 #          Andreas Geiger, Sanja Fidler
-# 
+#
 
 from .base import THREED_FRONT_BEDROOM_FURNITURE, \
     THREED_FRONT_LIVINGROOM_FURNITURE, THREED_FRONT_LIBRARY_FURNITURE
 from .common import BaseDataset
 from .threed_front import ThreedFront, CachedThreedFront
+from .bathroom import BathroomDataset  # ← 添加 bathroom import
 from .threed_front_dataset import dataset_encoding_factory
-
 from .splits_builder import CSVSplitsBuilder
 
 
@@ -22,11 +22,26 @@ def get_raw_dataset(
     split=["train", "val"]
 ):
     dataset_type = config["dataset_type"]
-    if "cached" in dataset_type:
+    
+    # ← 添加 bathroom 支持
+    if dataset_type == "bathroom":
+        # Load split scene IDs from text files
+        split_scene_ids = []
+        for split_name in split:
+            split_file = config.get(f"{split_name}_split_file")
+            if split_file:
+                with open(split_file, 'r') as f:
+                    scene_ids = [line.strip() for line in f if line.strip()]
+                    split_scene_ids.extend(scene_ids)
+        
+        dataset = BathroomDataset.from_dataset_directory(
+            config["dataset_directory"],
+            scene_ids=split_scene_ids if split_scene_ids else None
+        )
+    elif "cached" in dataset_type:
         # Make the train/test/validation splits
         splits_builder = CSVSplitsBuilder(config["annotation_file"])
         split_scene_ids = splits_builder.get_splits(split)
-
         dataset = CachedThreedFront(
             config["dataset_directory"],
             config=config,
@@ -58,7 +73,6 @@ def get_dataset_raw_and_encoded(
         augmentations,
         config.get("box_ordering", None)
     )
-
     return dataset, encoding
 
 
@@ -76,23 +90,31 @@ def get_encoded_dataset(
 
 
 def filter_function(config, split=["train", "val"], without_lamps=False):
-    print("Applying {} filtering".format(config["filter_fn"]))
-
-    if config["filter_fn"] == "no_filtering":
+    print("Applying {} filtering".format(config.get("filter_fn", "no_filtering")))
+    
+    # ← 添加 bathroom 过滤
+    if config.get("filter_fn") == "bathroom":
+        # Simple filter for bathroom: at least 1 object, at most 10
+        return BaseDataset.filter_compose(
+            BaseDataset.at_least_boxes(1),
+            BaseDataset.at_most_boxes(10)
+        )
+    
+    if config.get("filter_fn") == "no_filtering":
         return lambda s: s
-
+    
     # Parse the list of the invalid scene ids
     with open(config["path_to_invalid_scene_ids"], "r") as f:
         invalid_scene_ids = set(l.strip() for l in f)
-
+    
     # Parse the list of the invalid bounding boxes
     with open(config["path_to_invalid_bbox_jids"], "r") as f:
         invalid_bbox_jids = set(l.strip() for l in f)
-
+    
     # Make the train/test/validation splits
     splits_builder = CSVSplitsBuilder(config["annotation_file"])
     split_scene_ids = splits_builder.get_splits(split)
-
+    
     if "threed_front_bedroom" in config["filter_fn"]:
         return BaseDataset.filter_compose(
             BaseDataset.with_room("bed"),
