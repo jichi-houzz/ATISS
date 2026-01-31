@@ -34,15 +34,32 @@ training:
     optimizer: Adam
     lr: 0.0001
     weight_decay: 0.0
+
+    # Instant
     #epochs: 2
     #steps_per_epoch: 10
     #batch_size: 4
+
+    # 10min CPU, Test
     epochs: 50
     steps_per_epoch: 100
     batch_size: 4
-    #epochs: 300
-    #steps_per_epoch: 362
-    #batch_size: 32
+
+    # 2.5 hour CPU, 50%
+    #epochs: 150
+    #steps_per_epoch: 440
+    #batch_size: 4
+
+    # 30min GPU, 80%, paper batch used 128
+    #epochs: 150
+    #steps_per_epoch: 440
+    #batch_size: 16
+
+    # 24 hours GPU, 100%
+    #epochs: 150
+    #steps_per_epoch: 440
+    #batch_size: 128
+
 validation:
     splits: ["test"]
     frequency: 1
