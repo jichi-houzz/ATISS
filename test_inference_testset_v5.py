@@ -427,13 +427,16 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         color = colors.get(class_idx, (128, 128, 128))
 
         px, pz, pw, ph = denormalize_and_to_pixel(
-            gen_trans[i, 0], gen_trans[i, 1],  # ← 改成 [i, 1]
-            gen_sizes[i, 0], gen_sizes[i, 1]   # ← 改成 [i, 1]
+            gen_trans[i, 0], gen_trans[i, 2],  # Use x and z (skip y at index 1)
+            gen_sizes[i, 0], gen_sizes[i, 2]   # Use width and depth (skip height at index 1)
         )
 
         pw = abs(pw)
         ph = abs(ph)
-        angle = gen_angles[i, 0] if len(gen_angles[i].shape) > 0 else gen_angles[i]
+        angle_norm = gen_angles[i, 0] if len(gen_angles[i].shape) > 0 else gen_angles[i]
+        
+        # Denormalize angle from [-1, 1] to [-π, π]
+        angle = angle_norm * np.pi
 
         hw, hh = pw / 2, ph / 2
         cos_a = np.cos(angle)
@@ -547,7 +550,7 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
         category = categories[class_idx] if class_idx < 4 else "unknown"
         pos = generated['translations'][i]  # 3D: (x, y, z)
         size = generated['sizes'][i]        # 3D: (width, height, depth)
-        angle = generated['angles'][i, 0] if len(generated['angles'][i].shape) > 0 else generated['angles'][i]
+        angle_norm = generated['angles'][i, 0] if len(generated['angles'][i].shape) > 0 else generated['angles'][i]
 
         # Denormalize if bounds available
         if bounds:
@@ -563,10 +566,15 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
             real_size_x = (size[0] + 1) / 2 * (size_max - size_min) + size_min
             real_size_z = (size[2] + 1) / 2 * (size_max - size_min) + size_min
             
+            # Denormalize angle from [-1, 1] to [-π, π]
+            angle_real = (angle_norm + 1) / 2 * (np.pi - (-np.pi)) + (-np.pi)
+            # Simplifies to: angle_real = angle_norm * π
+            
             print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
-                  f"size=({size[0]:.3f}, {size[2]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle):6.1f}°")
+                  f"size=({size[0]:.3f}, {size[2]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle_real):6.1f}°")
         else:
-            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) | size=({size[0]:.3f}, {size[2]:.3f}) | angle={np.degrees(angle):6.1f}°")
+            # Without bounds, assume angle is already in radians
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) | size=({size[0]:.3f}, {size[2]:.3f}) | angle={np.degrees(angle_norm):6.1f}°")
 
         gen_count += 1
 
