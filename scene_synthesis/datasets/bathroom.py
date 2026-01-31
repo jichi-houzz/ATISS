@@ -177,7 +177,7 @@ class BathroomDataset(BaseDataset):
         # Hard-coded bounds based on dataset statistics:
         # - Position: [-25, 25] meters (x and z)
         # - Size: [0, 7] meters (width and depth)
-        # - Angle: [0, 2π] radians
+        # - Angle: [-π, π] radians (from arctan2)
         return {
             "translations": np.array([
                 [-25.0, 0.0, -25.0],  # min (x, y, z)
@@ -187,7 +187,7 @@ class BathroomDataset(BaseDataset):
                 [0.0, 0.0, 0.0],       # min
                 [7.0, 7.0, 7.0]        # max (use same bound for all dimensions)
             ], dtype=np.float32),
-            "angles": np.array([0, 2*np.pi], dtype=np.float32)
+            "angles": np.array([-np.pi, np.pi], dtype=np.float32)  # [-π, π]
         }
 
     @staticmethod
