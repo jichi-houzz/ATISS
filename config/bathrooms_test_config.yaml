@@ -29,13 +29,19 @@ feature_extractor:
     input_channels: 1
 training:
     splits: ["train", "val"]
-    epochs: 2
-    steps_per_epoch: 10
-    batch_size: 4
     save_frequency: 1
     optimizer: Adam
     lr: 0.0001
     weight_decay: 0.0
+    #epochs: 2
+    #steps_per_epoch: 10
+    #batch_size: 4
+    epochs: 50
+    steps_per_epoch: 100
+    batch_size: 4
+    #epochs: 300
+    #steps_per_epoch: 362
+    #batch_size: 32
 validation:
     splits: ["test"]
     frequency: 1
