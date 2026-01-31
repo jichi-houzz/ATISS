@@ -133,7 +133,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
         with torch.no_grad():
             generated_boxes = network.generate_boxes(
                 room_mask=room_mask,
-                max_boxes=20,
+                max_boxes=5,
                 device=device
             )
 
