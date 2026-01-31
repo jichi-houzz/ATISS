@@ -1,10 +1,10 @@
-# 
+#
 # Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
 # Licensed under the NVIDIA Source Code License.
 # See LICENSE at https://github.com/nv-tlabs/ATISS.
 # Authors: Despoina Paschalidou, Amlan Kar, Maria Shugrina, Karsten Kreis,
 #          Andreas Geiger, Sanja Fidler
-# 
+#
 
 import numpy as np
 
@@ -96,7 +96,16 @@ class RoomLayoutEncoder(DataEncoder):
 
     def __getitem__(self, idx):
         """Implement the encoding for the room layout as images."""
-        img = self._dataset[idx].room_mask[:, :, 0:1]
+        #img = self._dataset[idx].room_mask[:, :, 0:1]
+        # Support multi-channel room masks
+        # Adapt to size
+        room_mask = self._dataset[idx].room_mask
+        if len(room_mask.shape) == 2:
+            # (H, W) → (H, W, 1)
+            img = room_mask[:, :, np.newaxis]
+        else:
+            # (H, W, C) → keep all channels
+            img = room_mask
         return np.transpose(img, (2, 0, 1))
 
     @property

@@ -1,454 +1,533 @@
+#!/usr/bin/env python3
 """
-Bathroom Scene Preprocessing with 4-channel Architecture Support
-
-Generates:
-- Channel 0: Floor (walkable area)
-- Channel 1: Walls
-- Channel 2: Doors  
-- Channel 3: Windows
-
-And extracts furniture objects (toilet, vanity, shower, tub)
+Bathroom Data Preprocessing for ATISS Training
+Clean version with simplified logic:
+- Room bounds: from ALL items
+- Floor mask: only draw floors (white)
+- Furniture: only toilet, vanity, shower, tub
 """
 
-import numpy as np
 import json
-import argparse
+import numpy as np
 from pathlib import Path
-from tqdm import tqdm
-import cv2
+from typing import Dict, List, Tuple
+import argparse
+from PIL import Image, ImageDraw
 
 
-# Configuration
-FURNITURE_TYPES = ['toilet', 'vanity', 'shower', 'tub']
-ARCHITECTURE_TYPES = ['wall', 'door', 'window']
-FLOOR_TYPE = 'floor'
-SKIP_TYPES = ['clearance', 'ceiling']
+class BathroomDataPreprocessor:
+    """Converts bathroom JSON files to ATISS training format."""
 
-# Mask parameters
-MASK_SIZE = 128
-PIXELS_PER_METER = 40  # Fixed scale for consistent rendering
+    # Clear type definitions
+    ARCHITECTURE_TYPES = ['wall', 'door', 'window']
+    FURNITURE_TYPES = ['toilet', 'vanity', 'shower', 'tub']
+    FLOOR_TYPE = 'floor'
 
-
-def get_room_bounds(items):
-    """Calculate room bounds from all items (walls, doors, floors, furniture)."""
-    all_points = []
-    
-    for item in items:
-        diff_type = item.get('diffusion_type', '')
-        
-        # Skip clearance and ceiling
-        if diff_type in SKIP_TYPES:
-            continue
-        
-        cx = item.get('center_x', 0)
-        cz = item.get('center_z', 0)
-        sx = item.get('size_x', 0)
-        sz = item.get('size_z', 0)
-        
-        # Add bbox corners
-        all_points.extend([
-            [cx - sx/2, cz - sz/2],
-            [cx + sx/2, cz + sz/2]
-        ])
-    
-    if not all_points:
-        return 0, 0, 5, 5
-    
-    all_points = np.array(all_points)
-    min_x, min_z = all_points.min(axis=0)
-    max_x, max_z = all_points.max(axis=0)
-    
-    return min_x, min_z, max_x, max_z
-
-
-def world_to_pixel(x, z, min_x, min_z, pixels_per_meter):
-    """Convert world coordinates to pixel coordinates."""
-    px = int((x - min_x) * pixels_per_meter)
-    pz = int((z - min_z) * pixels_per_meter)
-    return px, pz
-
-
-def get_rotated_bbox_corners(center_x, center_z, size_x, size_z, yaw_degrees):
-    """
-    Get 4 corners of a rotated bounding box.
-    
-    Args:
-        center_x, center_z: Center position
-        size_x, size_z: Size (width, depth)
-        yaw_degrees: Rotation angle in degrees
-        
-    Returns:
-        corners: (4, 2) array of corner points
-    """
-    # Half sizes
-    hx = size_x / 2
-    hz = size_z / 2
-    
-    # Local corners (before rotation)
-    local_corners = np.array([
-        [-hx, -hz],
-        [ hx, -hz],
-        [ hx,  hz],
-        [-hx,  hz]
-    ])
-    
-    # Rotation matrix (yaw around y-axis, affects x-z plane)
-    yaw_rad = np.radians(yaw_degrees)
-    cos_yaw = np.cos(yaw_rad)
-    sin_yaw = np.sin(yaw_rad)
-    
-    rotation_matrix = np.array([
-        [cos_yaw, -sin_yaw],
-        [sin_yaw,  cos_yaw]
-    ])
-    
-    # Rotate and translate
-    rotated_corners = local_corners @ rotation_matrix.T
-    world_corners = rotated_corners + np.array([center_x, center_z])
-    
-    return world_corners
-
-
-def draw_architecture_item(mask, item, min_x, min_z, pixels_per_meter, channel, thickness=3):
-    """
-    Draw an architecture item (wall/door/window) to a specific channel.
-    
-    Args:
-        mask: (H, W, 4) mask array
-        item: Item dictionary
-        min_x, min_z: Room bounds
-        pixels_per_meter: Scale factor
-        channel: Which channel to draw to (1=wall, 2=door, 3=window)
-        thickness: Line thickness for drawing
-    """
-    cx = item.get('center_x', 0)
-    cz = item.get('center_z', 0)
-    sx = item.get('size_x', 0)
-    sz = item.get('size_z', 0)
-    yaw = item.get('yaw', 0)
-    
-    # Get rotated corners
-    corners = get_rotated_bbox_corners(cx, cz, sx, sz, yaw)
-    
-    # Convert to pixel coordinates
-    pixel_corners = []
-    for x, z in corners:
-        px, pz = world_to_pixel(x, z, min_x, min_z, pixels_per_meter)
-        pixel_corners.append([px, pz])
-    
-    pixel_corners = np.array(pixel_corners, dtype=np.int32)
-    
-    # Draw based on type
-    diff_type = item.get('diffusion_type', '')
-    
-    if diff_type == 'wall':
-        # Draw wall as outline (hollow rectangle)
-        cv2.polylines(mask[:, :, channel], [pixel_corners], 
-                     isClosed=True, color=255, thickness=thickness)
-    else:
-        # Draw door/window as filled rectangle
-        cv2.fillPoly(mask[:, :, channel], [pixel_corners], color=255)
-
-
-def draw_floor_polygon(mask, floor_item, min_x, min_z, pixels_per_meter):
-    """Draw floor polygon to channel 0."""
-    cx = floor_item.get('center_x', 0)
-    cz = floor_item.get('center_z', 0)
-    sx = floor_item.get('size_x', 0)
-    sz = floor_item.get('size_z', 0)
-    yaw = floor_item.get('yaw', 0)
-    
-    # Get rotated corners
-    corners = get_rotated_bbox_corners(cx, cz, sx, sz, yaw)
-    
-    # Convert to pixel coordinates
-    pixel_corners = []
-    for x, z in corners:
-        px, pz = world_to_pixel(x, z, min_x, min_z, pixels_per_meter)
-        pixel_corners.append([px, pz])
-    
-    pixel_corners = np.array(pixel_corners, dtype=np.int32)
-    
-    # Draw filled polygon
-    cv2.fillPoly(mask[:, :, 0], [pixel_corners], color=255)
-
-
-def create_4channel_room_layout(items, pixels_per_meter=PIXELS_PER_METER):
-    """
-    Create 4-channel room layout mask.
-    
-    Returns:
-        room_layout: (H, W, 4) uint8 array
-        room_dims: Dict with room dimension info
-    """
-    # Get room bounds
-    min_x, min_z, max_x, max_z = get_room_bounds(items)
-    width = max_x - min_x
-    depth = max_z - min_z
-    
-    # Calculate mask size
-    mask_width = int(width * pixels_per_meter)
-    mask_height = int(depth * pixels_per_meter)
-    
-    # Initialize 4-channel mask
-    room_layout = np.zeros((mask_height, mask_width, 4), dtype=np.uint8)
-    
-    # Separate items by type
-    floors = [item for item in items if item.get('diffusion_type') == 'floor']
-    walls = [item for item in items if item.get('diffusion_type') == 'wall']
-    doors = [item for item in items if item.get('diffusion_type') == 'door']
-    windows = [item for item in items if item.get('diffusion_type') == 'window']
-    
-    # Draw each type to its channel
-    # Channel 0: Floors
-    for floor in floors:
-        draw_floor_polygon(room_layout, floor, min_x, min_z, pixels_per_meter)
-    
-    # Channel 1: Walls
-    for wall in walls:
-        draw_architecture_item(room_layout, wall, min_x, min_z, pixels_per_meter, 
-                               channel=1, thickness=3)
-    
-    # Channel 2: Doors
-    for door in doors:
-        draw_architecture_item(room_layout, door, min_x, min_z, pixels_per_meter, 
-                               channel=2, thickness=5)
-    
-    # Channel 3: Windows
-    for window in windows:
-        draw_architecture_item(room_layout, window, min_x, min_z, pixels_per_meter, 
-                               channel=3, thickness=5)
-    
-    # Resize to standard size (128x128)
-    room_layout_resized = np.zeros((MASK_SIZE, MASK_SIZE, 4), dtype=np.uint8)
-    for c in range(4):
-        room_layout_resized[:, :, c] = cv2.resize(
-            room_layout[:, :, c], 
-            (MASK_SIZE, MASK_SIZE), 
-            interpolation=cv2.INTER_NEAREST
-        )
-    
-    # Room dimensions
-    room_dims = {
-        'width': width,
-        'depth': depth,
-        'min_x': min_x,
-        'min_z': min_z,
-        'max_x': max_x,
-        'max_z': max_z,
-        'pixels_per_meter': pixels_per_meter
+    # Category mapping for furniture only
+    CATEGORY_MAP = {
+        'toilet': 0,
+        'vanity': 1,
+        'shower': 2,
+        'tub': 3
     }
-    
-    return room_layout_resized, room_dims
 
+    def __init__(self, resolution: int = 128):
+        """
+        Initialize preprocessor.
 
-def extract_furniture(items, room_dims, pixels_per_meter=PIXELS_PER_METER):
-    """Extract furniture objects and normalize coordinates."""
-    furniture_list = []
-    
-    min_x = room_dims['min_x']
-    min_z = room_dims['min_z']
-    width = room_dims['width']
-    depth = room_dims['depth']
-    
-    for item in items:
-        diff_type = item.get('diffusion_type', '')
-        
-        if diff_type not in FURNITURE_TYPES:
-            continue
-        
-        # Extract position (normalized to [-1, 1])
-        cx = item.get('center_x', 0)
-        cz = item.get('center_z', 0)
-        
-        # Normalize to [0, 1] then to [-1, 1]
-        norm_x = (cx - min_x) / width if width > 0 else 0
-        norm_z = (cz - min_z) / depth if depth > 0 else 0
-        norm_x = norm_x * 2 - 1
-        norm_z = norm_z * 2 - 1
-        
-        # Extract size (normalized)
-        sx = item.get('size_x', 0) / width if width > 0 else 0
-        sz = item.get('size_z', 0) / depth if depth > 0 else 0
-        
-        # Extract angle (convert to radians, normalized to [0, 2π])
-        yaw = item.get('yaw', 0)
-        angle_rad = np.radians(yaw) % (2 * np.pi)
-        
-        furniture_list.append({
-            'type': diff_type,
-            'translation': [norm_x, norm_z],
-            'size': [sx, sz],
-            'angle': angle_rad
-        })
-    
-    return furniture_list
+        Args:
+            resolution: Target resolution for room masks (default: 128)
+        """
+        self.resolution = resolution
 
+    def load_json(self, json_path: str) -> Dict:
+        """Load bathroom scene JSON."""
+        with open(json_path, 'r') as f:
+            return json.load(f)
 
-def process_scene(json_path, output_dir):
-    """Process a single scene JSON file."""
-    # Load JSON
-    with open(json_path, 'r') as f:
-        data = json.load(f)
-    
-    items = data.get('items', [])
-    
-    # Filter out skip types
-    items = [item for item in items 
-             if item.get('diffusion_type', '') not in SKIP_TYPES]
-    
-    # Check if scene has furniture
-    furniture_count = sum(1 for item in items 
-                         if item.get('diffusion_type', '') in FURNITURE_TYPES)
-    if furniture_count == 0:
-        return False
-    
-    # Create 4-channel room layout
-    room_layout, room_dims = create_4channel_room_layout(items)
-    
-    # Extract furniture
-    furniture = extract_furniture(items, room_dims)
-    
-    if len(furniture) == 0:
-        return False
-    
-    # Convert to arrays
-    N = len(furniture)
-    class_labels = np.zeros((N, 6), dtype=np.float32)  # 4 furniture + 2 tokens
-    translations = np.zeros((N, 2), dtype=np.float32)
-    sizes = np.zeros((N, 2), dtype=np.float32)
-    angles = np.zeros((N, 2), dtype=np.float32)  # [cos, sin]
-    
-    for i, furn in enumerate(furniture):
-        # Class label (one-hot)
-        class_idx = FURNITURE_TYPES.index(furn['type'])
-        class_labels[i, class_idx] = 1.0
-        
-        # Translation
-        translations[i] = furn['translation']
-        
-        # Size
-        sizes[i] = furn['size']
-        
-        # Angle (as cos, sin)
-        angle = furn['angle']
-        angles[i] = [np.cos(angle), np.sin(angle)]
-    
-    # Create output directory
-    scene_id = json_path.stem
-    scene_output_dir = output_dir / scene_id
-    scene_output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Save NPZ
-    npz_path = scene_output_dir / 'boxes.npz'
-    np.savez(
-        npz_path,
-        class_labels=class_labels,
-        translations=translations,
-        sizes=sizes,
-        angles=angles,
-        room_layout=room_layout,  # (128, 128, 4)
-        objfeats_32=np.zeros((N, 32), dtype=np.float32)  # Placeholder
-    )
-    
-    # Save metadata
-    metadata = {
-        'scene_id': scene_id,
-        'num_furniture': N,
-        'room_dims': {k: float(v) for k, v in room_dims.items()},
-        'furniture_types': [furn['type'] for furn in furniture]
-    }
-    
-    metadata_path = scene_output_dir / 'metadata.json'
-    with open(metadata_path, 'w') as f:
-        json.dump(metadata, f, indent=2)
-    
-    # Save visualization
-    save_visualization(room_layout, class_labels, translations, sizes, 
-                      scene_output_dir / 'visualization.png')
-    
-    return True
+    def extract_room_dims(self, items: List[Dict]) -> Dict:
+        """
+        Extract room dimensions from ALL items.
 
+        Args:
+            items: All items from JSON
 
-def save_visualization(room_layout, class_labels, translations, sizes, output_path):
-    """Save visualization of the 4-channel mask and furniture."""
-    import matplotlib.pyplot as plt
-    
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    
-    # Show each channel
-    channel_names = ['Floor', 'Walls', 'Doors', 'Windows']
-    for i in range(4):
-        ax = axes[i // 2, i % 2]
-        ax.imshow(room_layout[:, :, i], cmap='gray')
-        ax.set_title(channel_names[i])
-        ax.axis('off')
-    
-    # Combined view
-    ax = axes[0, 2]
-    combined = np.zeros((MASK_SIZE, MASK_SIZE, 3), dtype=np.uint8)
-    combined[:, :, 0] = room_layout[:, :, 0]  # Floor - red channel
-    combined[:, :, 1] = room_layout[:, :, 1]  # Walls - green channel
-    combined[:, :, 2] = room_layout[:, :, 2] + room_layout[:, :, 3]  # Door+Window - blue
-    ax.imshow(combined)
-    ax.set_title('Combined (R=Floor, G=Wall, B=Door/Win)')
-    ax.axis('off')
-    
-    # Furniture overlay
-    ax = axes[1, 2]
-    ax.imshow(room_layout[:, :, 0], cmap='gray', alpha=0.3)
-    
-    colors = ['red', 'green', 'blue', 'yellow']
-    for i in range(len(class_labels)):
-        class_idx = np.argmax(class_labels[i, :4])
-        x = (translations[i, 0] + 1) * MASK_SIZE / 2
-        z = (translations[i, 1] + 1) * MASK_SIZE / 2
-        w = sizes[i, 0] * MASK_SIZE / 2
-        h = sizes[i, 1] * MASK_SIZE / 2
+        Returns:
+            Room dimension dict
+        """
+        if not items:
+            return None
+
+        x_coords = []
+        z_coords = []
+
+        # Use ALL items for room bounds
+        for item in items:
+            x1 = item['center_x'] - item['size_x'] / 2
+            x2 = item['center_x'] + item['size_x'] / 2
+            z1 = item['center_z'] - item['size_z'] / 2
+            z2 = item['center_z'] + item['size_z'] / 2
+
+            x_coords.extend([x1, x2])
+            z_coords.extend([z1, z2])
+
+        min_x = min(x_coords)
+        max_x = max(x_coords)
+        min_z = min(z_coords)
+        max_z = max(z_coords)
+
+        room_dims = {
+            'min_x': min_x,
+            'max_x': max_x,
+            'min_z': min_z,
+            'max_z': max_z,
+            'width': max_x - min_x,
+            'depth': max_z - min_z,
+            'center_x': (min_x + max_x) / 2,
+            'center_z': (min_z + max_z) / 2
+        }
+
+        return room_dims
+
+    def create_floor_plan_mask(self, items: List[Dict], room_dims: Dict,
+                                resolution: int = 128) -> np.ndarray:
+        """
+        Create 4-channel floor plan mask.
         
-        rect = plt.Rectangle((x - w/2, z - h/2), w, h,
-                            fill=False, edgecolor=colors[class_idx], linewidth=2)
-        ax.add_patch(rect)
-        ax.text(x, z, FURNITURE_TYPES[class_idx], 
-               color=colors[class_idx], fontsize=8)
-    
-    ax.set_title('Furniture Layout')
-    ax.axis('off')
-    
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches='tight')
-    plt.close()
+        Channel 0: Floors (walkable area)
+        Channel 1: Walls
+        Channel 2: Doors
+        Channel 3: Windows
+
+        Args:
+            items: All items from JSON
+            room_dims: Room dimension dict
+            resolution: Target resolution
+
+        Returns:
+            4-channel mask (128, 128, 4) where each channel is binary
+        """
+        from PIL import Image, ImageDraw
+
+        # Fixed scale: pixels per meter
+        PIXELS_PER_METER = 40
+
+        # Calculate canvas size
+        canvas_width = int(room_dims['width'] * PIXELS_PER_METER)
+        canvas_height = int(room_dims['depth'] * PIXELS_PER_METER)
+
+        # Create 4 separate canvases for each channel
+        canvas_floor = Image.new('L', (canvas_width, canvas_height), color=0)
+        canvas_wall = Image.new('L', (canvas_width, canvas_height), color=0)
+        canvas_door = Image.new('L', (canvas_width, canvas_height), color=0)
+        canvas_window = Image.new('L', (canvas_width, canvas_height), color=0)
+        
+        draw_floor = ImageDraw.Draw(canvas_floor)
+        draw_wall = ImageDraw.Draw(canvas_wall)
+        draw_door = ImageDraw.Draw(canvas_door)
+        draw_window = ImageDraw.Draw(canvas_window)
+
+        # Process each item
+        for item in items:
+            diffusion_type = item.get('diffusion_type')
+            
+            # Get geometry
+            cx = item['center_x']
+            cz = item['center_z']
+            w = item['size_x']
+            d = item['size_z']
+            yaw = item.get('yaw', 0.0)
+
+            # Calculate corners (with rotation if needed)
+            if abs(yaw) < 0.001:
+                # Axis-aligned rectangle
+                x1 = cx - w / 2
+                x2 = cx + w / 2
+                z1 = cz - d / 2
+                z2 = cz + d / 2
+
+                # Convert to canvas pixels
+                px1 = int((x1 - room_dims['min_x']) * PIXELS_PER_METER)
+                px2 = int((x2 - room_dims['min_x']) * PIXELS_PER_METER)
+                py1 = int((z1 - room_dims['min_z']) * PIXELS_PER_METER)
+                py2 = int((z2 - room_dims['min_z']) * PIXELS_PER_METER)
+
+                corners_pixels = [(px1, py1), (px2, py1), (px2, py2), (px1, py2)]
+            else:
+                # Rotated rectangle
+                yaw_rad = np.radians(yaw)
+                cos_yaw = np.cos(yaw_rad)
+                sin_yaw = np.sin(yaw_rad)
+
+                hw = w / 2
+                hd = d / 2
+
+                # 4 corners relative to center
+                corners_local = [
+                    (-hw, -hd),
+                    ( hw, -hd),
+                    ( hw,  hd),
+                    (-hw,  hd)
+                ]
+
+                # Rotate and translate
+                corners_world = []
+                for lx, lz in corners_local:
+                    rx = lx * cos_yaw - lz * sin_yaw
+                    rz = lx * sin_yaw + lz * cos_yaw
+                    wx = cx + rx
+                    wz = cz + rz
+                    corners_world.append((wx, wz))
+
+                # Convert to canvas pixels
+                corners_pixels = []
+                for wx, wz in corners_world:
+                    px = int((wx - room_dims['min_x']) * PIXELS_PER_METER)
+                    py = int((wz - room_dims['min_z']) * PIXELS_PER_METER)
+                    corners_pixels.append((px, py))
+
+            # Draw to appropriate channel
+            if diffusion_type == self.FLOOR_TYPE:
+                # Floor: filled polygon
+                draw_floor.polygon(corners_pixels, fill=255)
+                
+            elif diffusion_type == 'wall':
+                # Wall: outline only (thickness=3)
+                draw_wall.polygon(corners_pixels, outline=255, width=3)
+                
+            elif diffusion_type == 'door':
+                # Door: filled polygon
+                draw_door.polygon(corners_pixels, fill=255)
+                
+            elif diffusion_type == 'window':
+                # Window: filled polygon
+                draw_window.polygon(corners_pixels, fill=255)
+
+        # Resize all 4 channels
+        target_size = int(resolution * 0.8)
+        scale_factor = min(target_size / canvas_width, target_size / canvas_height)
+
+        new_width = int(canvas_width * scale_factor)
+        new_height = int(canvas_height * scale_factor)
+        
+        # Resize each channel
+        channels_resized = []
+        for canvas in [canvas_floor, canvas_wall, canvas_door, canvas_window]:
+            canvas_resized = canvas.resize((new_width, new_height), Image.Resampling.LANCZOS)
+            
+            # Create final image with padding to center
+            final_channel = Image.new('L', (resolution, resolution), color=0)
+            offset_x = (resolution - new_width) // 2
+            offset_y = (resolution - new_height) // 2
+            final_channel.paste(canvas_resized, (offset_x, offset_y))
+            
+            # Convert to numpy and binarize
+            mask_channel = np.array(final_channel)
+            mask_channel = (mask_channel > 127).astype(np.uint8)
+            channels_resized.append(mask_channel)
+
+        # Stack into 4-channel array
+        mask_4channel = np.stack(channels_resized, axis=-1)  # (128, 128, 4)
+
+        return mask_4channel
+        """
+        Create floor plan mask - ONLY draw floors as white.
+
+        Args:
+            items: All items from JSON
+            room_dims: Room dimension dict
+            resolution: Target resolution
+
+        Returns:
+            Binary mask (128, 128) where 1=floor, 0=everything else
+        """
+        from PIL import Image, ImageDraw
+
+        # Fixed scale: pixels per meter
+        PIXELS_PER_METER = 40
+
+        # Calculate canvas size
+        canvas_width = int(room_dims['width'] * PIXELS_PER_METER)
+        canvas_height = int(room_dims['depth'] * PIXELS_PER_METER)
+
+        # Create canvas - start with BLACK (all zeros)
+        canvas = Image.new('L', (canvas_width, canvas_height), color=0)
+        draw = ImageDraw.Draw(canvas)
+
+        # Draw ONLY floors as white
+        for item in items:
+            if item.get('diffusion_type') == self.FLOOR_TYPE:
+                # Get center and size
+                cx = item['center_x']
+                cz = item['center_z']
+                w = item['size_x']
+                d = item['size_z']
+                yaw = item.get('yaw', 0.0)
+
+                # Check if rotated
+                if abs(yaw) < 0.001:
+                    # Axis-aligned rectangle
+                    x1 = cx - w / 2
+                    x2 = cx + w / 2
+                    z1 = cz - d / 2
+                    z2 = cz + d / 2
+
+                    # Convert to canvas pixels
+                    px1 = int((x1 - room_dims['min_x']) * PIXELS_PER_METER)
+                    px2 = int((x2 - room_dims['min_x']) * PIXELS_PER_METER)
+                    py1 = int((z1 - room_dims['min_z']) * PIXELS_PER_METER)
+                    py2 = int((z2 - room_dims['min_z']) * PIXELS_PER_METER)
+
+                    # Draw white rectangle
+                    draw.rectangle([px1, py1, px2, py2], fill=255)
+                else:
+                    # Rotated rectangle - calculate 4 corners
+                    yaw_rad = np.radians(yaw)
+                    cos_yaw = np.cos(yaw_rad)
+                    sin_yaw = np.sin(yaw_rad)
+
+                    hw = w / 2
+                    hd = d / 2
+
+                    # 4 corners relative to center
+                    corners_local = [
+                        (-hw, -hd),
+                        ( hw, -hd),
+                        ( hw,  hd),
+                        (-hw,  hd)
+                    ]
+
+                    # Rotate and translate
+                    corners_world = []
+                    for lx, lz in corners_local:
+                        rx = lx * cos_yaw - lz * sin_yaw
+                        rz = lx * sin_yaw + lz * cos_yaw
+                        wx = cx + rx
+                        wz = cz + rz
+                        corners_world.append((wx, wz))
+
+                    # Convert to canvas pixels
+                    corners_pixels = []
+                    for wx, wz in corners_world:
+                        px = int((wx - room_dims['min_x']) * PIXELS_PER_METER)
+                        py = int((wz - room_dims['min_z']) * PIXELS_PER_METER)
+                        corners_pixels.append((px, py))
+
+                    # Draw rotated polygon
+                    draw.polygon(corners_pixels, fill=255)
+
+        # Resize to fit in target resolution with padding
+        target_size = int(resolution * 0.8)
+        scale_factor = min(target_size / canvas_width, target_size / canvas_height)
+
+        new_width = int(canvas_width * scale_factor)
+        new_height = int(canvas_height * scale_factor)
+        canvas_resized = canvas.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+        # Create final image with padding to center
+        final_img = Image.new('L', (resolution, resolution), color=0)
+        offset_x = (resolution - new_width) // 2
+        offset_y = (resolution - new_height) // 2
+        final_img.paste(canvas_resized, (offset_x, offset_y))
+
+        # Convert to numpy and binarize
+        mask = np.array(final_img)
+        mask = (mask > 127).astype(np.uint8)
+
+        return mask
+
+    def normalize_coordinates(self, x: float, z: float, room_dims: Dict) -> Tuple[float, float]:
+        """Normalize coordinates to [-1, 1] range."""
+        x_norm = (x - room_dims['center_x']) / (room_dims['width'] / 2)
+        z_norm = (z - room_dims['center_z']) / (room_dims['depth'] / 2)
+        return x_norm, z_norm
+
+    def normalize_size(self, size_x: float, size_z: float, room_dims: Dict) -> Tuple[float, float]:
+        """Normalize size relative to room dimensions."""
+        size_x_norm = size_x / room_dims['width']
+        size_z_norm = size_z / room_dims['depth']
+        return size_x_norm, size_z_norm
+
+    def extract_furniture(self, items: List[Dict], room_dims: Dict) -> List[Dict]:
+        """
+        Extract furniture items using diffusion_type only.
+
+        Args:
+            items: All items from JSON
+            room_dims: Room dimension dict
+
+        Returns:
+            List of furniture object dicts with normalized coordinates
+        """
+        furniture = []
+
+        for item in items:
+            diffusion_type = item.get('diffusion_type', '')
+
+            # Only process furniture types
+            if diffusion_type not in self.FURNITURE_TYPES:
+                continue
+
+            # Normalize coordinates and sizes
+            x_norm, z_norm = self.normalize_coordinates(
+                item['center_x'],
+                item['center_z'],
+                room_dims
+            )
+            size_x_norm, size_z_norm = self.normalize_size(
+                item['size_x'],
+                item['size_z'],
+                room_dims
+            )
+
+            # Convert angle to (cos, sin)
+            yaw_rad = np.radians(item.get('yaw', 0.0))
+            angle_cos = np.cos(yaw_rad)
+            angle_sin = np.sin(yaw_rad)
+
+            furniture.append({
+                'category': diffusion_type,
+                'category_id': self.CATEGORY_MAP[diffusion_type],
+                'position': (x_norm, z_norm),
+                'size': (size_x_norm, size_z_norm),
+                'angle': (angle_cos, angle_sin),
+                'uuid': item['uuid'],
+                'model_name': item.get('model_name', 'Unknown')
+            })
+
+        return furniture
+
+    def process_scene(self, json_path: str, output_dir: str, scene_id: str) -> bool:
+        """Process a single scene and save in ATISS format."""
+        try:
+            # Load JSON
+            data = self.load_json(json_path)
+            items = data.get('items', [])
+
+            if not items:
+                print(f"Warning: No items found in {json_path}")
+                return False
+
+            # Extract room dimensions from ALL items
+            room_dims = self.extract_room_dims(items)
+
+            if room_dims is None:
+                print(f"Warning: Could not determine room dimensions for {json_path}")
+                return False
+
+            # Extract furniture
+            furniture_items = self.extract_furniture(items, room_dims)
+
+            if not furniture_items:
+                print(f"Warning: No furniture items found in {json_path}")
+                return False
+
+            # Create arrays for ATISS format
+            num_objects = len(furniture_items)
+            num_categories = len(self.CATEGORY_MAP)
+
+            # Class labels (one-hot encoded)
+            class_labels = np.zeros((num_objects, num_categories), dtype=np.float32)
+            for i, item in enumerate(furniture_items):
+                class_labels[i, item['category_id']] = 1.0
+
+            # Translations (x, z positions)
+            translations = np.array([item['position'] for item in furniture_items], dtype=np.float32)
+
+            # Sizes (width, depth)
+            sizes = np.array([item['size'] for item in furniture_items], dtype=np.float32)
+
+            # Angles (cos, sin)
+            angles = np.array([item['angle'] for item in furniture_items], dtype=np.float32)
+
+            # Room layout mask (only floors are white)
+            room_layout = self.create_floor_plan_mask(items, room_dims, self.resolution)
+
+            # Placeholder for object features
+            objfeats_32 = np.zeros((num_objects, 32), dtype=np.float32)
+
+            # Create output directory
+            scene_output_dir = Path(output_dir) / scene_id
+            scene_output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Save NPZ file
+            np.savez_compressed(
+                scene_output_dir / 'boxes.npz',
+                class_labels=class_labels,
+                translations=translations,
+                sizes=sizes,
+                angles=angles,
+                room_layout=room_layout,
+                objfeats_32=objfeats_32
+            )
+
+            # Save room mask as PNG for visualization
+            mask_img = Image.fromarray((room_layout * 255).astype(np.uint8))
+            mask_img.save(scene_output_dir / 'room_mask.png')
+
+            # Save metadata
+            metadata = {
+                'scene_id': scene_id,
+                'num_objects': num_objects,
+                'num_categories': num_categories,
+                'categories': self.CATEGORY_MAP,
+                'room_dims': room_dims,
+                'furniture_items': [
+                    {
+                        'uuid': item['uuid'],
+                        'model_name': item['model_name'],
+                        'category': item['category'],
+                        'category_id': item['category_id']
+                    }
+                    for item in furniture_items
+                ]
+            }
+
+            with open(scene_output_dir / 'metadata.json', 'w') as f:
+                json.dump(metadata, f, indent=2)
+
+            return True
+
+        except Exception as e:
+            print(f"Error processing {json_path}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    def process_dataset(self, input_dir: str, output_dir: str):
+        """Process all JSON files in input directory."""
+        input_path = Path(input_dir)
+        json_files = list(input_path.glob('*.json'))
+
+        print(f"Found {len(json_files)} JSON files")
+
+        success_count = 0
+        fail_count = 0
+
+        for json_file in json_files:
+            scene_id = json_file.stem
+            print(f"Processing {scene_id}...")
+
+            if self.process_scene(str(json_file), output_dir, scene_id):
+                success_count += 1
+            else:
+                fail_count += 1
+
+        print(f"\nProcessing complete!")
+        print(f"Successfully processed: {success_count}")
+        print(f"Failed: {fail_count}")
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Preprocess bathroom scenes with 4-channel architecture')
-    parser.add_argument('input_dir', type=str, help='Input directory with JSON files')
-    parser.add_argument('output_dir', type=str, help='Output directory for processed data')
-    parser.add_argument('--pixels-per-meter', type=int, default=40, 
-                       help='Pixels per meter for mask rendering')
-    
+    parser = argparse.ArgumentParser(description='Preprocess bathroom JSON data for ATISS training')
+    parser.add_argument('input_dir', type=str, help='Directory containing JSON files')
+    parser.add_argument('output_dir', type=str, help='Output directory for preprocessed data')
+    parser.add_argument('--resolution', type=int, default=128, help='Resolution for room masks (default: 128)')
+
     args = parser.parse_args()
-    
-    input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Find all JSON files
-    json_files = list(input_dir.glob('*.json'))
-    print(f"Found {len(json_files)} JSON files")
-    
-    # Process each file
-    success_count = 0
-    for json_file in tqdm(json_files, desc='Processing scenes'):
-        try:
-            if process_scene(json_file, output_dir):
-                success_count += 1
-        except Exception as e:
-            print(f"\nError processing {json_file.name}: {e}")
-            continue
-    
-    print(f"\n✓ Successfully processed {success_count}/{len(json_files)} scenes")
-    print(f"  Output directory: {output_dir}")
+
+    preprocessor = BathroomDataPreprocessor(resolution=args.resolution)
+    preprocessor.process_dataset(args.input_dir, args.output_dir)
 
 
 if __name__ == '__main__':
