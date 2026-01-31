@@ -469,18 +469,64 @@ def save_results_to_npz(results, output_dir):
     print(f"\n✓ Saved {len(results)} scenes")
 
 
-def print_comparison(ground_truth, generated, scene_id):
-    """Print text comparison."""
+def print_comparison(ground_truth, generated, scene_id, bounds=None):
+    """Print text comparison with detailed object information."""
     print(f"\n{'='*60}")
     print(f"Scene: {scene_id}")
     print(f"{'='*60}")
-
+    
+    categories = ['toilet', 'vanity', 'shower', 'tub']
+    
+    # Ground truth count
     gt_count = len(ground_truth['class_labels'])
-    gen_count = sum(1 for i in range(len(generated['class_labels']))
-                   if generated['class_labels'][i, -2] != 1 and generated['class_labels'][i, -1] != 1)
+    print(f"\n📍 Ground Truth: {gt_count} objects")
+    for i in range(gt_count):
+        class_idx = np.argmax(ground_truth['class_labels'][i, :4])
+        category = categories[class_idx]
+        pos = ground_truth['translations'][i]
+        size = ground_truth['sizes'][i]
+        angle = ground_truth['angles'][i, 0] if len(ground_truth['angles'][i].shape) > 0 else ground_truth['angles'][i]
+        
+        print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
+    
+    # Generated objects
+    gen_count = 0
+    print(f"\n🎲 Generated Objects:")
+    for i in range(len(generated['class_labels'])):
+        # Skip start/end tokens
+        if generated['class_labels'][i, -2] == 1:  # start token
+            continue
+        if generated['class_labels'][i, -1] == 1:  # end token
+            print(f"  [{i}] END_TOKEN")
+            break
+        
+        class_idx = np.argmax(generated['class_labels'][i, :4])
+        category = categories[class_idx] if class_idx < 4 else "unknown"
+        pos = generated['translations'][i]
+        size = generated['sizes'][i]
+        angle = generated['angles'][i, 0] if len(generated['angles'][i].shape) > 0 else generated['angles'][i]
+        
+        # Denormalize if bounds available
+        if bounds:
+            bounds_min = bounds['bounds_min']
+            bounds_max = bounds['bounds_max']
+            size_min = bounds['size_min']
+            size_max = bounds['size_max']
+            
+            real_x = pos[0] * (bounds_max - bounds_min) + bounds_min
+            real_z = pos[1] * (bounds_max - bounds_min) + bounds_min
+            real_size_x = size[0] * (size_max - size_min) + size_min
+            real_size_z = size[1] * (size_max - size_min) + size_min
+            
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
+                  f"size=({size[0]:.3f}, {size[1]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle):6.1f}°")
+        else:
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
+        
+        gen_count += 1
+    
+    print(f"\n📊 Summary: GT={gt_count} objects, Generated={gen_count} objects")
 
-    print(f"\nGround Truth: {gt_count} objects")
-    print(f"Generated:    {gen_count} objects")
 
 
 def main():
@@ -510,7 +556,7 @@ def main():
 
     if args.verbose:
         for gt, gen, scene_id, room_dims, bounds, arch in results[:3]:
-            print_comparison(gt, gen, scene_id)
+            print_comparison(gt, gen, scene_id, bounds)
 
     print(f"\n✓ Complete! Generated {len(results)} scenes")
 
