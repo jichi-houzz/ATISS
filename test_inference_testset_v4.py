@@ -163,8 +163,25 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             class_idx = test_dataset.CATEGORIES.index(bbox.label)
             one_hot[class_idx] = 1.0
             gt_class_labels.append(one_hot)
-            gt_translations.append(bbox.centroid())
-            gt_sizes.append(bbox.size)
+            
+            # Extract 2D coordinates (x, z) from 3D centroid
+            centroid = bbox.centroid()
+            if len(centroid) == 3:
+                # 3D format: (x, y, z) → take (x, z)
+                gt_translations.append([centroid[0], centroid[2]])
+            else:
+                # Already 2D
+                gt_translations.append(centroid)
+            
+            # Extract 2D size (width, depth)
+            bbox_size = bbox.size
+            if len(bbox_size) == 3:
+                # 3D format: (width, height, depth) → take (width, depth)
+                gt_sizes.append([bbox_size[0], bbox_size[2]])
+            else:
+                # Already 2D
+                gt_sizes.append(bbox_size)
+            
             gt_angles.append([bbox.z_angle])
 
         ground_truth = {
@@ -352,8 +369,8 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         color = colors.get(class_idx, (128, 128, 128))
 
         px, pz, pw, ph = denormalize_and_to_pixel(
-            gt_trans[i, 0], gt_trans[i, 2],
-            gt_sizes[i, 0], gt_sizes[i, 2]
+            gt_trans[i, 0], gt_trans[i, 1],  # ← 改成 [i, 1]，因为现在是 2D
+            gt_sizes[i, 0], gt_sizes[i, 1]   # ← 改成 [i, 1]
         )
 
         pw = abs(pw)
@@ -390,8 +407,8 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         color = colors.get(class_idx, (128, 128, 128))
 
         px, pz, pw, ph = denormalize_and_to_pixel(
-            gen_trans[i, 0], gen_trans[i, 2],
-            gen_sizes[i, 0], gen_sizes[i, 2]
+            gen_trans[i, 0], gen_trans[i, 1],  # ← 改成 [i, 1]
+            gen_sizes[i, 0], gen_sizes[i, 1]   # ← 改成 [i, 1]
         )
 
         pw = abs(pw)
@@ -487,7 +504,13 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
         size = ground_truth['sizes'][i]
         angle = ground_truth['angles'][i, 0] if len(ground_truth['angles'][i].shape) > 0 else ground_truth['angles'][i]
         
-        print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
+        # Handle both 2D (x, z) and 3D (x, y, z) formats
+        if len(pos) == 3:
+            # 3D format: use x and z, skip y
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) | size=({size[0]:.3f}, {size[2]:.3f}) | angle={np.degrees(angle):6.1f}°")
+        else:
+            # 2D format: use as-is
+            print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) | size=({size[0]:.3f}, {size[1]:.3f}) | angle={np.degrees(angle):6.1f}°")
     
     # Generated objects
     gen_count = 0
