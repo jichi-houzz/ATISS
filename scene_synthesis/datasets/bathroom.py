@@ -175,17 +175,17 @@ class BathroomDataset(BaseDataset):
     def bounds(self):
         """Return hard-coded bounds for normalization/denormalization."""
         # Hard-coded bounds based on dataset statistics:
-        # - Position: [-25, 25] meters (x and z)
-        # - Size: [0, 7] meters (width and depth)
+        # - Position: [-25, 25] meters (x and z), y is fixed at 0 but needs range for normalization
+        # - Size: [0, 7] meters (width and depth), height is fixed at 0.5 but needs range
         # - Angle: [-π, π] radians (from arctan2)
         return {
             "translations": np.array([
-                [-25.0, 0.0, -25.0],  # min (x, y, z)
-                [25.0, 0.0, 25.0]      # max (x, y, z)
+                [-25.0, -1.0, -25.0],  # min (x, y, z) - y needs non-zero range
+                [25.0, 1.0, 25.0]      # max (x, y, z)
             ], dtype=np.float32),
             "sizes": np.array([
                 [0.0, 0.0, 0.0],       # min
-                [7.0, 7.0, 7.0]        # max (use same bound for all dimensions)
+                [7.0, 1.0, 7.0]        # max - y (height) needs non-zero range
             ], dtype=np.float32),
             "angles": np.array([-np.pi, np.pi], dtype=np.float32)  # [-π, π]
         }
