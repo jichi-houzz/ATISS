@@ -59,7 +59,7 @@ def load_architecture_from_json(json_path, room_dims, bounds):
         z_01 = (cz - bounds_min) / (bounds_max - bounds_min)
         sx_01 = (sx - size_min) / (size_max - size_min)
         sz_01 = (sz - size_min) / (size_max - size_min)
-        
+
         # Step 2: scale to [-1, 1]
         x_norm = 2 * x_01 - 1
         z_norm = 2 * z_01 - 1
@@ -145,7 +145,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
         with torch.no_grad():
             generated_boxes = network.generate_boxes(
                 room_mask=room_mask,
-                max_boxes=5,
+                max_boxes=4, # 4 furniture
                 device=device
             )
         stop_time = time.time()
@@ -187,7 +187,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             else:
                 # Already 2D
                 x_real, z_real = centroid[0], centroid[1]
-            
+
             # Normalize to [-1, 1] (same as training data)
             x_01 = (x_real - bounds['position_min']) / (bounds['position_max'] - bounds['position_min'])
             z_01 = (z_real - bounds['position_min']) / (bounds['position_max'] - bounds['position_min'])
@@ -203,7 +203,7 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             else:
                 # Already 2D
                 w_real, d_real = bbox_size[0], bbox_size[1]
-            
+
             # Normalize to [-1, 1]
             w_01 = (w_real - bounds['size_min']) / (bounds['size_max'] - bounds['size_min'])
             d_01 = (d_real - bounds['size_min']) / (bounds['size_max'] - bounds['size_min'])
@@ -318,12 +318,12 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         """Convert normalized coords to pixel coords using bounds."""
         # ATISS normalizes to [-1, 1], not [0, 1]
         # Need to convert back: descale(x) = (x + 1) / 2 * (max - min) + min
-        
+
         position_min = bounds['position_min']
         position_max = bounds['position_max']
         size_min = bounds['size_min']
         size_max = bounds['size_max']
-        
+
         # Denormalize from [-1, 1] to world coords (meters)
         real_x = (norm_x + 1) / 2 * (position_max - position_min) + position_min
         real_z = (norm_z + 1) / 2 * (position_max - position_min) + position_min
@@ -411,7 +411,7 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         valid = any(0 <= x < W and 0 <= y < H for x, y in corners)
         if valid and pw > 0 and ph > 0:
             draw_gt.polygon(corners, outline=color, width=3)
-            draw_gt.text((px, pz), categories[class_idx], fill=color)
+            #draw_gt.text((px, pz), categories[class_idx], fill=color)
 
     # Draw generated furniture
     gen_classes = generated['class_labels']
@@ -434,7 +434,7 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         pw = abs(pw)
         ph = abs(ph)
         angle_norm = gen_angles[i, 0] if len(gen_angles[i].shape) > 0 else gen_angles[i]
-        
+
         # Denormalize angle from [-1, 1] to [-π, π]
         angle = angle_norm * np.pi
 
@@ -452,12 +452,12 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
         valid = any(0 <= x < W and 0 <= y < H for x, y in corners)
         if valid and pw > 0 and ph > 0:
             draw_gen.polygon(corners, outline=color, width=3)
-            label = categories[class_idx] if class_idx < 4 else "?"
-            draw_gen.text((px, pz), label, fill=color)
+            #label = categories[class_idx] if class_idx < 4 else "?"
+            #draw_gen.text((px, pz), label, fill=color)
 
     # Combine images
-    combined_width = W * 2 + 40
-    combined_height = H + 80
+    combined_width = W * 2 + int(40*8)
+    combined_height = H + int(80*1.5)
     combined = Image.new('RGB', (combined_width, combined_height), color=(255, 255, 255))
 
     combined.paste(img_gt, (10, 50))
@@ -558,18 +558,18 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
             position_max = bounds['position_max']
             size_min = bounds['size_min']
             size_max = bounds['size_max']
-            
+
             # ATISS uses [-1, 1] range, need to convert back
             # Use pos[0] (x) and pos[2] (z), skip pos[1] (y)
             real_x = (pos[0] + 1) / 2 * (position_max - position_min) + position_min
             real_z = (pos[2] + 1) / 2 * (position_max - position_min) + position_min
             real_size_x = (size[0] + 1) / 2 * (size_max - size_min) + size_min
             real_size_z = (size[2] + 1) / 2 * (size_max - size_min) + size_min
-            
+
             # Denormalize angle from [-1, 1] to [-π, π]
             angle_real = (angle_norm + 1) / 2 * (np.pi - (-np.pi)) + (-np.pi)
             # Simplifies to: angle_real = angle_norm * π
-            
+
             print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[2]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
                   f"size=({size[0]:.3f}, {size[2]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle_real):6.1f}°")
         else:

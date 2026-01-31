@@ -5,9 +5,9 @@ data:
     train_split_file: "data/train_scenes.txt"
     val_split_file: "data/val_scenes.txt"
     test_split_file: "data/test_scenes.txt"
-    augmentations: ["rotations"]
+    #augmentations: ["rotations"]
     #augmentations: ["jitter"]
-    #augmentations: []
+    augmentations: []
     filter_fn: "bathroom"
     train_stats: "dataset_stats.txt"
     room_layout_size: "64,64"
