@@ -160,6 +160,14 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             'room_mask': scene.room_mask[:, :, 0] if len(scene.room_mask.shape) == 3 else scene.room_mask
         }
 
+        # Define bounds (same as bathroom_v2.py)
+        bounds = {
+            'position_min': -25.0,
+            'position_max': 25.0,
+            'size_min': 0.0,
+            'size_max': 7.0
+        }
+
         gt_class_labels = []
         gt_translations = []
         gt_sizes = []
@@ -175,19 +183,33 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             centroid = bbox.centroid()
             if len(centroid) == 3:
                 # 3D format: (x, y, z) → take (x, z)
-                gt_translations.append([centroid[0], centroid[2]])
+                x_real, z_real = centroid[0], centroid[2]
             else:
                 # Already 2D
-                gt_translations.append(centroid)
+                x_real, z_real = centroid[0], centroid[1]
+            
+            # Normalize to [-1, 1] (same as training data)
+            x_01 = (x_real - bounds['position_min']) / (bounds['position_max'] - bounds['position_min'])
+            z_01 = (z_real - bounds['position_min']) / (bounds['position_max'] - bounds['position_min'])
+            x_norm = 2 * x_01 - 1
+            z_norm = 2 * z_01 - 1
+            gt_translations.append([x_norm, z_norm])
 
             # Extract 2D size (width, depth)
             bbox_size = bbox.size
             if len(bbox_size) == 3:
                 # 3D format: (width, height, depth) → take (width, depth)
-                gt_sizes.append([bbox_size[0], bbox_size[2]])
+                w_real, d_real = bbox_size[0], bbox_size[2]
             else:
                 # Already 2D
-                gt_sizes.append(bbox_size)
+                w_real, d_real = bbox_size[0], bbox_size[1]
+            
+            # Normalize to [-1, 1]
+            w_01 = (w_real - bounds['size_min']) / (bounds['size_max'] - bounds['size_min'])
+            d_01 = (d_real - bounds['size_min']) / (bounds['size_max'] - bounds['size_min'])
+            w_norm = 2 * w_01 - 1
+            d_norm = 2 * d_01 - 1
+            gt_sizes.append([w_norm, d_norm])
 
             gt_angles.append([bbox.z_angle])
 
@@ -207,15 +229,6 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
             with open(metadata_path, 'r') as f:
                 metadata = json.load(f)
                 room_dims = metadata.get('room_dims', None)
-        
-        # Use hard-coded bounds (same as bathroom.py)
-        # These match the bounds in bathroom_v2.py
-        bounds = {
-            'position_min': -25.0,
-            'position_max': 25.0,
-            'size_min': 0.0,
-            'size_max': 7.0
-        }
 
         # Try to load architecture from original JSON
         if json_dir and room_dims:
