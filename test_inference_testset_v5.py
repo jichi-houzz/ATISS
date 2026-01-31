@@ -53,11 +53,18 @@ def load_architecture_from_json(json_path, room_dims, bounds):
         sz = item['size_z']
         yaw = -item.get('yaw', 0.0)
 
-        # Normalize using global bounds
-        x_norm = (cx - bounds_min) / (bounds_max - bounds_min)
-        z_norm = (cz - bounds_min) / (bounds_max - bounds_min)
-        sx_norm = (sx - size_min) / (size_max - size_min)
-        sz_norm = (sz - size_min) / (size_max - size_min)
+        # Normalize to [-1, 1] (same as ATISS Scale class)
+        # Step 1: normalize to [0, 1]
+        x_01 = (cx - bounds_min) / (bounds_max - bounds_min)
+        z_01 = (cz - bounds_min) / (bounds_max - bounds_min)
+        sx_01 = (sx - size_min) / (size_max - size_min)
+        sz_01 = (sz - size_min) / (size_max - size_min)
+        
+        # Step 2: scale to [-1, 1]
+        x_norm = 2 * x_01 - 1
+        z_norm = 2 * z_01 - 1
+        sx_norm = 2 * sx_01 - 1
+        sz_norm = 2 * sz_01 - 1
 
         # Angle in radians
         yaw_rad = np.radians(yaw)
@@ -296,17 +303,19 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, bounds
 
     def denormalize_and_to_pixel(norm_x, norm_z, norm_size_x, norm_size_z):
         """Convert normalized coords to pixel coords using bounds."""
-        # Use hard-coded bounds (same as bathroom_v2.py)
+        # ATISS normalizes to [-1, 1], not [0, 1]
+        # Need to convert back: descale(x) = (x + 1) / 2 * (max - min) + min
+        
         position_min = bounds['position_min']
         position_max = bounds['position_max']
         size_min = bounds['size_min']
         size_max = bounds['size_max']
         
-        # Denormalize from [0, 1] to world coords (meters)
-        real_x = norm_x * (position_max - position_min) + position_min
-        real_z = norm_z * (position_max - position_min) + position_min
-        real_size_x = norm_size_x * (size_max - size_min) + size_min
-        real_size_z = norm_size_z * (size_max - size_min) + size_min
+        # Denormalize from [-1, 1] to world coords (meters)
+        real_x = (norm_x + 1) / 2 * (position_max - position_min) + position_min
+        real_z = (norm_z + 1) / 2 * (position_max - position_min) + position_min
+        real_size_x = (norm_size_x + 1) / 2 * (size_max - size_min) + size_min
+        real_size_z = (norm_size_z + 1) / 2 * (size_max - size_min) + size_min
 
         # Convert to pixels at original scale
         PIXELS_PER_METER = 40
@@ -534,10 +543,11 @@ def print_comparison(ground_truth, generated, scene_id, bounds=None):
             size_min = bounds['size_min']
             size_max = bounds['size_max']
             
-            real_x = pos[0] * (position_max - position_min) + position_min
-            real_z = pos[1] * (position_max - position_min) + position_min
-            real_size_x = size[0] * (size_max - size_min) + size_min
-            real_size_z = size[1] * (size_max - size_min) + size_min
+            # ATISS uses [-1, 1] range, need to convert back
+            real_x = (pos[0] + 1) / 2 * (position_max - position_min) + position_min
+            real_z = (pos[1] + 1) / 2 * (position_max - position_min) + position_min
+            real_size_x = (size[0] + 1) / 2 * (size_max - size_min) + size_min
+            real_size_z = (size[1] + 1) / 2 * (size_max - size_min) + size_min
             
             print(f"  [{i}] {category:8s} | pos=({pos[0]:6.3f}, {pos[1]:6.3f}) → ({real_x:6.2f}m, {real_z:6.2f}m) | "
                   f"size=({size[0]:.3f}, {size[1]:.3f}) → ({real_size_x:.2f}m, {real_size_z:.2f}m) | angle={np.degrees(angle):6.1f}°")
