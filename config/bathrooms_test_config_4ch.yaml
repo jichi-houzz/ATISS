@@ -6,6 +6,7 @@ data:
     val_split_file: "data/val_scenes.txt"
     test_split_file: "data/test_scenes.txt"
     #augmentations: ["rotations"]
+    #augmentations: ["jitter"]
     augmentations: []
     filter_fn: "bathroom"
     train_stats: "dataset_stats.txt"
