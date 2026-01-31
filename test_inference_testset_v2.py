@@ -1,5 +1,5 @@
 """
-Test inference on test/validation set with proper coordinate scaling
+Test inference on test/validation set with proper coordinate scaling using room_dims
 """
 
 import torch
@@ -66,14 +66,11 @@ def generate_from_test_set(network, config, split='test', num_scenes=10, device=
         scene = test_dataset[idx]
         scene_id = scene.scene_id
         
-        room_mask_np = scene.room_mask
-        
         # Handle both (H, W) and (H, W, C) formats
+        room_mask_np = scene.room_mask
         if len(room_mask_np.shape) == 2:
-            # (H, W) -> (H, W, 1)
             room_mask_np = room_mask_np[:, :, np.newaxis]
         
-        # Now should be (H, W, C), convert to (1, C, H, W)
         room_mask = torch.from_numpy(room_mask_np).permute(2, 0, 1)[None].float().to(device)
         
         with torch.no_grad():
@@ -127,7 +124,7 @@ def generate_from_test_set(network, config, split='test', num_scenes=10, device=
 
 
 def create_comparison_image(ground_truth, generated, scene_id, room_dims, output_path):
-    """Create side-by-side comparison visualization with correct scaling."""
+    """Create side-by-side comparison visualization with correct scaling using room_dims."""
     from PIL import Image, ImageDraw, ImageFont
     
     room_mask = ground_truth['room_mask']
@@ -135,46 +132,71 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, output
     
     # Get room dimensions for denormalization
     if room_dims is None:
-        # Fallback: assume normalized coordinates directly map to mask
         print(f"Warning: No room_dims for {scene_id}, using fallback")
         width, depth = 1.0, 1.0
         min_x, min_z = -0.5, -0.5
-        pixels_per_meter = W
     else:
         width = room_dims.get('width', 1.0)
         depth = room_dims.get('depth', 1.0)
         min_x = room_dims.get('min_x', 0)
         min_z = room_dims.get('min_z', 0)
-        pixels_per_meter = room_dims.get('pixels_per_meter', 40)
     
     def denormalize_and_to_pixel(norm_x, norm_z, norm_size_x, norm_size_z):
-        """Convert normalized coords to pixel coords."""
+        """
+        Convert normalized coords to pixel coords, matching the preprocessing logic.
+        
+        Preprocessing does:
+        1. x_norm = (x - center_x) / (width / 2)  # Normalized around center
+        2. Creates mask at 40 pixels/meter
+        3. Resizes to 80% of target resolution (128 * 0.8 = 102.4)
+        4. Pads to center in 128x128
+        
+        So we need to reverse this.
+        """
+        center_x = room_dims.get('center_x', 0)
+        center_z = room_dims.get('center_z', 0)
+        
         # Step 1: Denormalize from [-1, 1] to world coords
-        real_x = (norm_x + 1) / 2 * width + min_x
-        real_z = (norm_z + 1) / 2 * depth + min_z
+        # Reverse of: x_norm = (x - center_x) / (width / 2)
+        real_x = norm_x * (width / 2) + center_x
+        real_z = norm_z * (depth / 2) + center_z
         real_size_x = norm_size_x * width
         real_size_z = norm_size_z * depth
         
-        # Step 2: Convert to pixels (at original resolution)
-        px_original = (real_x - min_x) * pixels_per_meter
-        pz_original = (real_z - min_z) * pixels_per_meter
-        pw_original = real_size_x * pixels_per_meter
-        ph_original = real_size_z * pixels_per_meter
+        # Step 2: Convert to pixels at original scale (40 pixels/meter)
+        PIXELS_PER_METER = 40
+        canvas_width = width * PIXELS_PER_METER
+        canvas_height = depth * PIXELS_PER_METER
         
-        # Step 3: Scale to mask size (128x128) - use consistent scale to preserve aspect ratio
-        original_width = width * pixels_per_meter
-        original_height = depth * pixels_per_meter
+        # Position relative to room bounds
+        px_canvas = (real_x - min_x) * PIXELS_PER_METER
+        pz_canvas = (real_z - min_z) * PIXELS_PER_METER
+        pw_canvas = real_size_x * PIXELS_PER_METER
+        ph_canvas = real_size_z * PIXELS_PER_METER
         
-        # Use the same scale for both dimensions to preserve aspect ratio
-        scale = min(W / original_width if original_width > 0 else 1,
-                   H / original_height if original_height > 0 else 1)
+        # Step 3: Apply the same scaling as preprocessing
+        target_size = int(W * 0.8)  # 128 * 0.8 = 102.4
+        scale_factor = min(target_size / canvas_width, target_size / canvas_height)
         
-        px = int(px_original * scale)
-        pz = int(pz_original * scale)
-        pw = int(pw_original * scale)
-        ph = int(ph_original * scale)
+        new_width = canvas_width * scale_factor
+        new_height = canvas_height * scale_factor
         
-        return px, pz, pw, ph
+        # Scale pixel coordinates
+        px_scaled = px_canvas * scale_factor
+        pz_scaled = pz_canvas * scale_factor
+        pw_scaled = pw_canvas * scale_factor
+        ph_scaled = ph_canvas * scale_factor
+        
+        # Step 4: Add padding offset (centering)
+        offset_x = (W - new_width) / 2
+        offset_y = (H - new_height) / 2
+        
+        px_final = int(px_scaled + offset_x)
+        pz_final = int(pz_scaled + offset_y)
+        pw_final = int(pw_scaled)
+        ph_final = int(ph_scaled)
+        
+        return px_final, pz_final, pw_final, ph_final
     
     mask_img = (room_mask * 255).astype(np.uint8)
     img_gt = Image.fromarray(mask_img).convert('RGB')
@@ -195,28 +217,56 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, output
     gt_classes = ground_truth['class_labels']
     gt_trans = ground_truth['translations']
     gt_sizes = ground_truth['sizes']
+    gt_angles = ground_truth['angles']
     
     for i in range(len(gt_classes)):
         class_idx = np.argmax(gt_classes[i, :4])
         color = colors.get(class_idx, (128, 128, 128))
         
-        # Use denormalization
+        # Use proper denormalization
         px, pz, pw, ph = denormalize_and_to_pixel(
             gt_trans[i, 0], gt_trans[i, 2],
             gt_sizes[i, 0], gt_sizes[i, 2]
         )
         
-        x1, z1 = max(0, px - pw//2), max(0, pz - ph//2)
-        x2, z2 = min(W, px + pw//2), min(H, pz + ph//2)
+        # Handle negative sizes
+        pw = abs(pw)
+        ph = abs(ph)
         
-        if x1 < x2 and z1 < z2:
-            draw_gt.rectangle([x1, z1, x2, z2], outline=color, width=3)
+        # Get rotation angle
+        angle = gt_angles[i, 0]  # radians
+        
+        # Calculate 4 corners with rotation
+        hw, hh = pw / 2, ph / 2
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        
+        # 4 corners relative to center (before rotation)
+        corners_local = [
+            (-hw, -hh),
+            ( hw, -hh),
+            ( hw,  hh),
+            (-hw,  hh)
+        ]
+        
+        # Rotate and translate to world position
+        corners = []
+        for cx, cy in corners_local:
+            rx = cx * cos_a - cy * sin_a
+            ry = cx * sin_a + cy * cos_a
+            corners.append((int(px + rx), int(pz + ry)))
+        
+        # Check if any corner is within bounds
+        valid = any(0 <= x < W and 0 <= y < H for x, y in corners)
+        if valid and pw > 0 and ph > 0:
+            draw_gt.polygon(corners, outline=color, width=3)
             draw_gt.text((px, pz), categories[class_idx], fill=color)
     
     # Draw generated boxes
     gen_classes = generated['class_labels']
     gen_trans = generated['translations']
     gen_sizes = generated['sizes']
+    gen_angles = generated['angles']
     
     for i in range(len(gen_classes)):
         if gen_classes[i, -2] == 1 or gen_classes[i, -1] == 1:
@@ -225,17 +275,43 @@ def create_comparison_image(ground_truth, generated, scene_id, room_dims, output
         class_idx = np.argmax(gen_classes[i, :4])
         color = colors.get(class_idx, (128, 128, 128))
         
-        # Use denormalization
+        # Use proper denormalization
         px, pz, pw, ph = denormalize_and_to_pixel(
             gen_trans[i, 0], gen_trans[i, 2],
             gen_sizes[i, 0], gen_sizes[i, 2]
         )
         
-        x1, z1 = max(0, px - pw//2), max(0, pz - ph//2)
-        x2, z2 = min(W, px + pw//2), min(H, pz + ph//2)
+        # Handle negative sizes
+        pw = abs(pw)
+        ph = abs(ph)
         
-        if x1 < x2 and z1 < z2:
-            draw_gen.rectangle([x1, z1, x2, z2], outline=color, width=3)
+        # Get rotation angle
+        angle = gen_angles[i, 0] if len(gen_angles[i].shape) > 0 else gen_angles[i]
+        
+        # Calculate 4 corners with rotation
+        hw, hh = pw / 2, ph / 2
+        cos_a = np.cos(angle)
+        sin_a = np.sin(angle)
+        
+        # 4 corners relative to center (before rotation)
+        corners_local = [
+            (-hw, -hh),
+            ( hw, -hh),
+            ( hw,  hh),
+            (-hw,  hh)
+        ]
+        
+        # Rotate and translate to world position
+        corners = []
+        for cx, cy in corners_local:
+            rx = cx * cos_a - cy * sin_a
+            ry = cx * sin_a + cy * cos_a
+            corners.append((int(px + rx), int(pz + ry)))
+        
+        # Check if any corner is within bounds
+        valid = any(0 <= x < W and 0 <= y < H for x, y in corners)
+        if valid and pw > 0 and ph > 0:
+            draw_gen.polygon(corners, outline=color, width=3)
             label = categories[class_idx] if class_idx < 4 else "?"
             draw_gen.text((px, pz), label, fill=color)
     
