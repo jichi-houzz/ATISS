@@ -51,7 +51,13 @@ training:
     #batch_size: 4
 
     # 2.5 hour CPU, 50%
-    epochs: 150
+    #epochs: 150
+    #steps_per_epoch: 440
+    #batch_size: 4
+
+    # 5 hour CPU, 40%
+    # Can overfit
+    epochs: 300
     steps_per_epoch: 440
     batch_size: 4
 

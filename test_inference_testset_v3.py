@@ -45,7 +45,7 @@ def load_architecture_from_json(json_path, room_dims):
         cz = item['center_z']
         sx = item['size_x']
         sz = item['size_z']
-        yaw = item.get('yaw', 0.0)
+        yaw = -item.get('yaw', 0.0)
 
         # Normalize position
         x_norm = (cx - center_x) / (width / 2)
@@ -102,6 +102,8 @@ def generate_from_test_set(network, config, json_dir, split='test', num_scenes=1
         split_file = config['data']['test_split_file']
     elif split == 'val':
         split_file = config['data']['val_split_file']
+    elif split == 'train':
+        split_file = config['data']['train_split_file']
     else:
         raise ValueError(f"Invalid split: {split}")
 
@@ -464,7 +466,7 @@ def main():
     parser.add_argument('--json-dir', type=str, default='data/bathroom_2.2k_filter',
                        help='Directory with original JSON files for architecture')
     parser.add_argument('--output-dir', type=str, default='inference_results')
-    parser.add_argument('--split', type=str, default='test', choices=['test', 'val'])
+    parser.add_argument('--split', type=str, default='test', choices=['test', 'val', 'train'])
     parser.add_argument('--num-scenes', type=int, default=10)
     parser.add_argument('--verbose', action='store_true')
 
