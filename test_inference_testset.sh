@@ -1,4 +1,9 @@
 #!/bin/bash -v
-python test_inference_testset_v2.py output_test/epoch50_N3BO74H4M/model_00001 \
+#python test_inference_testset_v2.py output_test/epoch50_N3BO74H4M/model_00049 \
+#    --num-scenes 10 \
+#    --verbose
+
+python test_inference_testset_v2.py output_test_4ch/jvvdluvdm/model_00001 \
+    --config config/bathrooms_test_config_4ch.yaml \
     --num-scenes 10 \
     --verbose
