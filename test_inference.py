@@ -25,9 +25,14 @@ def load_model(config_path, checkpoint_path, device='cpu'):
     )
     
     # Build network
+    # Calculate input_dims: n_classes + 3 (translation) + 3 (size) + 1 (angle)
+    input_dims = len(dataset.class_labels) + 3 + 3 + 1
+    
     network, _, _ = build_network(
-        dataset.class_labels,
-        config,
+        input_dims=input_dims,
+        n_classes=len(dataset.class_labels),
+        config=config.get("network", {}),
+        weight_file=None,
         device=device
     )
     
