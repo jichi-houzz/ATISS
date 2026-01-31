@@ -100,6 +100,7 @@ class RoomLayoutEncoder(DataEncoder):
         # Support multi-channel room masks
         # Adapt to size
         room_mask = self._dataset[idx].room_mask
+        #print(f"DEBUG room_mask: shape={room_mask.shape}, dtype={room_mask.dtype}, type={type(room_mask)}")
         if len(room_mask.shape) == 2:
             # (H, W) → (H, W, 1)
             img = room_mask[:, :, np.newaxis]
